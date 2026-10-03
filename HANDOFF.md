@@ -43,6 +43,6 @@
 6. **Hardware bring-up order:** modes 1 → 2 (check that the encoders count in the right direction) → 5 → 3 → 4 → 6 → 7 on a small maze → full maze.
 7. **Match day:** set `MMRC_DEBUG 0`, wipe the map (hold the button at power-on), check the mirror setting, battery above 7.8 V, and ask the judges about `AUTO_RESTART`.
 
-## Not a git repository
+## Repository
 
-`mmrc26/` isn't under version control yet. To start, run `git init` and commit the current state.
+https://github.com/suwwaneh2006-dot/mmrc26 (branch `main`)
