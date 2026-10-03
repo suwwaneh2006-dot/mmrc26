@@ -1,6 +1,3 @@
-// =============================================================================
-//  motors.cpp - see motors.h
-// =============================================================================
 #include "motors.h"
 
 #include <Preferences.h>
@@ -12,7 +9,7 @@
 
 namespace {
 
-constexpr uint32_t MODEL_MAGIC = 0x4D4D5631;   // "MMV1"
+constexpr uint32_t MODEL_MAGIC = 0x4D4D5631;
 
 struct Side {
   uint8_t pwmPin, in1Pin, in2Pin;
@@ -25,11 +22,11 @@ Side g_left  = {PIN_MOTOR_L_PWM, PIN_MOTOR_L_IN1, PIN_MOTOR_L_IN2, MOTOR_L_INVER
 Side g_right = {PIN_MOTOR_R_PWM, PIN_MOTOR_R_IN1, PIN_MOTOR_R_IN2, MOTOR_R_INVERT, 0.0f, 0.0f};
 
 bool g_enabled = false;
-// Written by the watchdog timer task and by the main loop.
+
 volatile Fault    g_fault        = Fault::NONE;
 volatile uint32_t g_lastFeedMs   = 0;
 volatile bool     g_watchEnabled = false;
-volatile uint32_t g_graceUntilMs = 0;   // watchdog tolerance for blocking sections
+volatile uint32_t g_graceUntilMs = 0;
 
 VelocityModel g_model;
 bool          g_modelCalibrated = false;
@@ -37,11 +34,10 @@ esp_timer_handle_t g_watchdogTimer = nullptr;
 
 float clampf(float x, float lo, float hi) { return x < lo ? lo : (x > hi ? hi : x); }
 
-// Drive one H-bridge channel. |volts| below MOTOR_ZERO_V = short brake.
 void writeSide(const Side& s, float volts, float batt_v) {
   const float v = s.invert ? -volts : volts;
   if (fabsf(v) < MOTOR_ZERO_V) {
-    // TB6612 short brake: IN1 = IN2 = HIGH.
+
     digitalWrite(s.in1Pin, HIGH);
     digitalWrite(s.in2Pin, HIGH);
     ledcWrite(s.pwmPin, 0);
@@ -58,8 +54,6 @@ void slew(Side& s, float dt_s) {
   s.applied_v += clampf(s.target_v - s.applied_v, -step, step);
 }
 
-// Runs in the esp_timer task, independent of the main loop. If the control
-// tick stops feeding, the H-bridge is disabled at the hardware pin.
 void watchdogCallback(void*) {
   if (!g_watchEnabled) return;
   const uint32_t now = millis();
@@ -83,7 +77,7 @@ void loadModel() {
   g_model = ok ? m : motors::defaultModel();
 }
 
-}  // namespace
+}
 
 const char* faultName(Fault f) {
   switch (f) {
@@ -100,9 +94,6 @@ const char* faultName(Fault f) {
   return "?";
 }
 
-// ---------------------------------------------------------------------------
-//  VelocityModel
-// ---------------------------------------------------------------------------
 bool VelocityModel::valid() const {
   if (magic != MODEL_MAGIC || count < 2 || count > MODEL_MAX_POINTS) return false;
   if (!(tau_s > 0.0f && tau_s < 1.0f)) return false;
@@ -117,7 +108,7 @@ float VelocityModel::speedFor(float v) const {
   const float a = fabsf(v);
   if (a <= volts[0]) return 0.0f;
   int i = 1;
-  while (i < count - 1 && a > volts[i]) ++i;   // segment [i-1, i], last one extrapolates
+  while (i < count - 1 && a > volts[i]) ++i;
   const float t = (a - volts[i - 1]) / (volts[i] - volts[i - 1]);
   const float s = mm_s[i - 1] + t * (mm_s[i] - mm_s[i - 1]);
   return v < 0.0f ? -s : s;
@@ -133,13 +124,10 @@ float VelocityModel::voltsFor(float speed_mm_s) const {
   return speed_mm_s < 0.0f ? -v : v;
 }
 
-// ---------------------------------------------------------------------------
-//  motors
-// ---------------------------------------------------------------------------
 namespace motors {
 
 void begin() {
-  // STBY first: the bridge must be off before anything else happens.
+
   pinMode(PIN_MOTOR_STBY, OUTPUT);
   digitalWrite(PIN_MOTOR_STBY, LOW);
   g_enabled = false;
@@ -149,7 +137,7 @@ void begin() {
     pinMode(s->in2Pin, OUTPUT);
     digitalWrite(s->in1Pin, LOW);
     digitalWrite(s->in2Pin, LOW);
-    // Both motor channels use 20 kHz / 10 bit and therefore share one timer.
+
     ledcAttach(s->pwmPin, MOTOR_PWM_HZ, MOTOR_PWM_BITS);
     ledcWrite(s->pwmPin, 0);
     s->target_v = s->applied_v = 0.0f;
@@ -199,7 +187,7 @@ void setVolts(float left_v, float right_v) {
 
 void update(float dt_s) {
   if (!g_enabled || g_fault != Fault::NONE) {
-    if (g_enabled) disable();   // a fault was latched elsewhere
+    if (g_enabled) disable();
     return;
   }
   slew(g_left, dt_s);
@@ -264,4 +252,4 @@ VelocityModel defaultModel() {
   return m;
 }
 
-}  // namespace motors
+}

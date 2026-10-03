@@ -1,6 +1,3 @@
-// =============================================================================
-//  sim/mouse.cpp - see mouse.h
-// =============================================================================
 #include "mouse.h"
 
 #include <iostream>
@@ -12,7 +9,6 @@
 
 namespace {
 
-// Big objects live in static storage (same as on the robot).
 mm::Maze     g_maze;
 mm::Router   g_router(g_maze);
 mm::Explorer g_explorer(g_maze, g_router);
@@ -25,7 +21,6 @@ mm::TimeModel tierModel(int tier) {
                                     TURN_ACCEL_DPS2, PLAN_TURN_SETTLE_S, PLAN_SEGMENT_S);
 }
 
-// mms draws in its own (canonical) frame, which is ours when not mirrored.
 void drawCell(mm::Cell c, const MouseOptions& o) {
   if (!o.visualize || o.mirror) return;
   for (int d = 0; d < 4; ++d) {
@@ -40,7 +35,6 @@ void turnAround() {
   g_explorer.setPose(g_explorer.pos(), mm::turnBack(g_explorer.heading()));
 }
 
-// Cell-by-cell run (search, or exploring return). Returns true on arrival.
 bool exploreRun(mm::Explorer::Target target, bool exploreForSpeed, const MouseOptions& o,
                 int& moves, MouseReport& rep) {
   g_explorer.startRun(target, exploreForSpeed, tierModel(0), PLAN_EXPLORE_GAIN);
@@ -75,7 +69,6 @@ bool exploreRun(mm::Explorer::Target target, bool exploreForSpeed, const MouseOp
   }
 }
 
-// Speed run on verified walls only. Returns false if no verified path.
 bool speedRun(mm::Explorer::Target target, const MouseOptions& o, int& moves, MouseReport& rep) {
   static mm::Path path;
   if (!g_explorer.planSpeedRun(target, tierModel(1), false, path)) return false;
@@ -106,15 +99,13 @@ bool speedRun(mm::Explorer::Target target, const MouseOptions& o, int& moves, Mo
   return true;
 }
 
-// Return to start: explore if the optimistic route is worth checking,
-// otherwise drive the verified fastest path home.
 bool returnRun(const MouseOptions& o, int& moves, MouseReport& rep) {
   const bool explore = !EXPLORE_WALL_HUG && g_explorer.explorationWorthwhile(tierModel(1), PLAN_EXPLORE_GAIN, nullptr);
   if (!explore && speedRun(mm::Explorer::TO_START, o, moves, rep)) return true;
   return exploreRun(mm::Explorer::TO_START, true, o, moves, rep);
 }
 
-}  // namespace
+}
 
 const mm::Maze& mouseMaze() { return g_maze; }
 
@@ -140,7 +131,7 @@ MouseReport runMouse(const MouseOptions& o) {
   }
 
   int moves = 0;
-  // 1. Search to the goal.
+
   rep.searchOk = exploreRun(mm::Explorer::TO_GOAL, false, o, moves, rep);
   rep.searchMoves = moves;
   if (!rep.searchOk) {
@@ -151,7 +142,6 @@ MouseReport runMouse(const MouseOptions& o) {
   ++rep.runsDone;
   turnAround();
 
-  // 2. Return, then speed run / return loops.
   for (int loop = 0; loop <= o.loops; ++loop) {
     if (!returnRun(o, moves, rep)) {
       rep.failure = "return did not reach the start";

@@ -1,6 +1,3 @@
-// =============================================================================
-//  maze.cpp - see maze.h. Pure C++11, no Arduino dependencies.
-// =============================================================================
 #include "maze.h"
 
 #include <math.h>
@@ -24,14 +21,13 @@ inline Cell cellOfState(uint16_t s) {
 }
 inline Dir dirOfState(uint16_t s) { return static_cast<Dir>(s & 3); }
 
-// Number of quarter-turns to the LEFT that take heading a to heading b.
 inline int leftQuarters(Dir a, Dir b) { return (a - b) & 3; }
-// Quarter-turns (0..3) -> PathStep::turn encoding.
+
 inline int8_t turnCode(int quarters) {
   switch (quarters & 3) {
-    case 1:  return 1;    // left
-    case 2:  return 2;    // about-turn
-    case 3:  return -1;   // right
+    case 1:  return 1;
+    case 2:  return 2;
+    case 3:  return -1;
     default: return 0;
   }
 }
@@ -39,9 +35,8 @@ inline int absi(int v) { return v < 0 ? -v : v; }
 inline int manhattan(Cell a, Cell b) { return absi(a.x - b.x) + absi(a.y - b.y); }
 inline int quartersOf(int8_t code) { return code == 1 ? 1 : (code == 2 ? 2 : (code == -1 ? 3 : 0)); }
 
-// Duration of a rest-to-rest trapezoidal move of length d.
 float trapezoidS(float d, float vmax, float accel) {
-  const float dAccel = vmax * vmax / accel;   // accel + decel distance at vmax
+  const float dAccel = vmax * vmax / accel;
   return d < dAccel ? 2.0f * sqrtf(d / accel) : d / vmax + vmax / accel;
 }
 
@@ -54,7 +49,7 @@ uint16_t fletcher16(const uint8_t* data, int n) {
   return static_cast<uint16_t>((b << 8) | a);
 }
 
-}  // namespace
+}
 
 char dirChar(Dir d) {
   static const char k[4] = {'n', 'e', 's', 'w'};
@@ -73,9 +68,6 @@ const char* actionName(Action a) {
   return "?";
 }
 
-// ---------------------------------------------------------------------------
-//  CellSet
-// ---------------------------------------------------------------------------
 void CellSet::clear() {
   memset(bits_, 0, sizeof(bits_));
   count_ = 0;
@@ -94,9 +86,6 @@ bool CellSet::has(Cell c) const {
   return (bits_[i >> 3] >> (i & 7)) & 1u;
 }
 
-// ---------------------------------------------------------------------------
-//  Maze
-// ---------------------------------------------------------------------------
 void Maze::reset(int width, int height) {
   w_ = static_cast<uint8_t>(width < 1 ? 1 : (width > MAX_SIZE ? MAX_SIZE : width));
   h_ = static_cast<uint8_t>(height < 1 ? 1 : (height > MAX_SIZE ? MAX_SIZE : height));
@@ -149,13 +138,12 @@ bool Maze::isOpen(Cell c, Dir d, bool optimistic) const {
 WallResult Maze::setWall(Cell c, Dir d, bool present) {
   if (!inside(c)) return WallResult::UNCHANGED;
   if (!inside(neighbour(c, d))) {
-    // Boundary walls are certain; a reading of "open" there is a sensor error.
+
     return present ? WallResult::UNCHANGED : WallResult::CONFLICT;
   }
   if (isKnown(c, d)) {
     if (hasWall(c, d) == present) return WallResult::UNCHANGED;
-    // Contradiction: forget the wall so it is sensed again; a speed run will
-    // treat it as a wall (unknown = wall) until then.
+
     setRaw(c, d, false, false);
     if (conflicts_ < 0xFFFF) ++conflicts_;
     return WallResult::CONFLICT;
@@ -205,7 +193,7 @@ int Maze::postViolations() const {
       const Cell se = {static_cast<int8_t>(i), static_cast<int8_t>(j - 1)};
       const Cell nw = {static_cast<int8_t>(i - 1), static_cast<int8_t>(j)};
       const Cell ne = {static_cast<int8_t>(i), static_cast<int8_t>(j)};
-      if (isGoal(sw) && isGoal(se) && isGoal(nw) && isGoal(ne)) continue;   // centre post
+      if (isGoal(sw) && isGoal(se) && isGoal(nw) && isGoal(ne)) continue;
       const bool allKnownOpen = isKnown(sw, EAST) && !hasWall(sw, EAST) &&
                                 isKnown(nw, EAST) && !hasWall(nw, EAST) &&
                                 isKnown(sw, NORTH) && !hasWall(sw, NORTH) &&
@@ -247,9 +235,6 @@ bool Maze::deserialize(const uint8_t* buf, int length) {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-//  TimeModel / Path
-// ---------------------------------------------------------------------------
 float TimeModel::straightS(int cells) const {
   return trapezoidS(cells * cellMm, speedMmS, accelMmS2) + segmentS;
 }
@@ -272,9 +257,6 @@ int Path::cells() const {
   return n;
 }
 
-// ---------------------------------------------------------------------------
-//  Router
-// ---------------------------------------------------------------------------
 void Router::flood(const CellSet& targets, bool optimistic) {
   static Cell queue[MAX_CELLS];
   int head = 0, tail = 0;
@@ -307,7 +289,7 @@ Action Router::nextAction(Cell pos, Dir heading, bool optimistic) const {
   const uint16_t here = dist(pos);
   if (here == UNREACHABLE) return Action::NO_PATH;
   if (here == 0) return Action::ARRIVED;
-  // Preference order on ties: straight, left, right, back.
+
   const Dir options[4] = {heading, turnLeft(heading), turnRight(heading), turnBack(heading)};
   const Action actions[4] = {Action::FORWARD, Action::LEFT, Action::RIGHT, Action::BACK};
   int best = -1;
@@ -366,7 +348,7 @@ uint16_t Router::heapPop() {
   --heapSize_;
   heap_[0] = heap_[heapSize_];
   heapPos_[heap_[0]] = 0;
-  heapPos_[top] = -2;   // finalised
+  heapPos_[top] = -2;
   if (heapSize_ > 0) siftDown(0);
   return top;
 }
@@ -383,7 +365,7 @@ bool Router::fastest(Cell from, Dir heading, const CellSet& targets, bool optimi
   for (int s = 0; s < STATES; ++s) {
     cost_[s] = INF_COST;
     prev_[s] = 0xFFFF;
-    heapPos_[s] = -1;   // never queued
+    heapPos_[s] = -1;
   }
   heapSize_ = 0;
 
@@ -400,7 +382,7 @@ bool Router::fastest(Cell from, Dir heading, const CellSet& targets, bool optimi
       goalState = s;
       break;
     }
-    // Relax one edge s -> t with cost w.
+
     auto relax = [&](uint16_t t, float w) {
       if (heapPos_[t] == -2) return;
       const float nc = cost_[s] + w;
@@ -422,13 +404,10 @@ bool Router::fastest(Cell from, Dir heading, const CellSet& targets, bool optimi
   }
   if (goalState < 0) return false;
 
-  // Walk back to the start (reusing heap_ as the scratch list).
   int len = 0;
   for (uint16_t s = static_cast<uint16_t>(goalState); s != start; s = prev_[s]) heap_[len++] = s;
   heap_[len++] = start;
 
-  // Forward pass: merge consecutive turns into one, and consecutive
-  // straights into one, then recompute the time from the merged steps.
   int pendingQuarters = 0;
   bool lastWasStraight = false;
   for (int i = len - 1; i > 0; --i) {
@@ -438,7 +417,7 @@ bool Router::fastest(Cell from, Dir heading, const CellSet& targets, bool optimi
       pendingQuarters += leftQuarters(dirOfState(a), dirOfState(b));
       lastWasStraight = false;
     } else {
-      const int k = manhattan(ca, cb);   // straight edge: one of the terms is 0
+      const int k = manhattan(ca, cb);
       if (lastWasStraight && (pendingQuarters & 3) == 0 && out.count > 0) {
         out.steps[out.count - 1].cells = static_cast<uint8_t>(out.steps[out.count - 1].cells + k);
       } else if (out.count < MAX_PATH_STEPS) {
@@ -463,9 +442,6 @@ bool Router::fastest(Cell from, Dir heading, const CellSet& targets, bool optimi
   return true;
 }
 
-// ---------------------------------------------------------------------------
-//  Explorer
-// ---------------------------------------------------------------------------
 CellSet Explorer::startSet() {
   CellSet s;
   const Cell start = {0, 0};
@@ -485,12 +461,10 @@ void Explorer::startRun(Target target, bool exploreForSpeed, const TimeModel& tm
   memset(seenHeadings_, 0, sizeof(seenHeadings_));
 }
 
-// Hand rule on the walls just read (canonical frame). Left hand: left, else
-// straight, else right, else back. Right hand: mirror image.
 Action Explorer::wallHugStep(bool wallLeft, bool wallFront, bool wallRight) {
   const int idx = pos_.x * MAX_SIZE + pos_.y;
   const uint8_t bit = static_cast<uint8_t>(1u << heading_);
-  if (seenHeadings_[idx] & bit) {   // same cell, same heading again: circling
+  if (seenHeadings_[idx] & bit) {
     looped_ = true;
     return Action::NO_PATH;
   }
@@ -508,7 +482,7 @@ bool Explorer::explorationWorthwhile(const TimeModel& tm, float gainThreshold, C
   const Cell start = {0, 0};
   if (!router_.fastest(start, NORTH, maze_.goal(), true, tm, scratch_)) return false;
   const float optimistic = scratch_.timeS;
-  // Collect the not-yet-visited cells along the optimistic path.
+
   if (cellsOut != nullptr) {
     Cell c = start;
     Dir h = NORTH;
@@ -538,7 +512,7 @@ Action Explorer::step(bool wallLeft, bool wallFront, bool wallRight) {
   for (WallResult w : r) {
     if (w == WallResult::CONFLICT && runConflicts_ < 0xFFFF) ++runConflicts_;
   }
-  if (++steps_ > 4 * MAX_CELLS) return Action::NO_PATH;   // cannot happen in a consistent maze
+  if (++steps_ > 4 * MAX_CELLS) return Action::NO_PATH;
 
   Action a;
   const bool arrived = target_ == TO_GOAL ? maze_.isGoal(pos_) : pos_ == Cell{0, 0};
@@ -588,4 +562,4 @@ bool Explorer::planSpeedRun(Target target, const TimeModel& tm, bool optimistic,
   return true;
 }
 
-}  // namespace mm
+}

@@ -1,6 +1,3 @@
-// =============================================================================
-//  sim/robot/shim/esp_timer.h - periodic timers, called by the simulated clock.
-// =============================================================================
 #pragma once
 
 #include <stdint.h>

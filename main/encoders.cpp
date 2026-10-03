@@ -1,6 +1,3 @@
-// =============================================================================
-//  encoders.cpp - see encoders.h
-// =============================================================================
 #include "encoders.h"
 
 #include <initializer_list>
@@ -11,20 +8,20 @@ namespace {
 
 struct Wheel {
   uint8_t           pin;
-  volatile uint32_t edges;       // written by the ISR only
-  uint32_t          lastEdges;   // at the previous tick
-  int8_t            dir;         // +1 / -1, from the motor command
+  volatile uint32_t edges;
+  uint32_t          lastEdges;
+  int8_t            dir;
   float             mm;
   float             speed;
-  // speed window
+
   uint32_t          windowEdges;
   int32_t           windowSigned;
   float             windowTime;
-  // health
+
   uint32_t          silentMs;
   bool              faulty;
   uint32_t          recoverEdges;
-  uint32_t          drivenSilentMs;   // silent while driven (any other wheel state)
+  uint32_t          drivenSilentMs;
 };
 
 Wheel g_left  = {PIN_ENC_L_A, 0, 0, 1, 0.0f, 0.0f, 0, 0, 0.0f, 0, false, 0, 0};
@@ -36,8 +33,6 @@ void IRAM_ATTR edgeIsr(void* arg) {
   w->edges = w->edges + 1;
 }
 
-// Direction for the edges of this tick: the sign of the applied voltage,
-// unchanged while the motor is (almost) unpowered and still rolling.
 void updateDir(Wheel& w, float appliedV) {
   if (appliedV > MOTOR_ZERO_V) w.dir = 1;
   else if (appliedV < -MOTOR_ZERO_V) w.dir = -1;
@@ -45,12 +40,11 @@ void updateDir(Wheel& w, float appliedV) {
 
 void updateWheel(Wheel& w, float appliedV, bool otherCounting, float dt_s) {
   updateDir(w, appliedV);
-  const uint32_t e = w.edges;          // 32-bit read: atomic on the ESP32
+  const uint32_t e = w.edges;
   const uint32_t delta = e - w.lastEdges;
   w.lastEdges = e;
   w.mm += w.dir * static_cast<float>(delta) * ENC_MM_PER_EDGE;
 
-  // Speed over a short window, then low-pass.
   w.windowSigned += w.dir * static_cast<int32_t>(delta);
   w.windowTime += dt_s;
   if (w.windowTime * 1000.0f >= ENC_SPEED_WINDOW_MS) {
@@ -60,7 +54,6 @@ void updateWheel(Wheel& w, float appliedV, bool otherCounting, float dt_s) {
     w.windowTime = 0.0f;
   }
 
-  // Health: silent while clearly driven and the other wheel is turning.
   const bool driven = fabsf(motors::model().speedFor(appliedV)) >= ENC_DRIVEN_MIN_MM_S;
   if (delta > 0) w.drivenSilentMs = 0;
   else if (driven) w.drivenSilentMs += static_cast<uint32_t>(dt_s * 1000.0f + 0.5f);
@@ -73,7 +66,7 @@ void updateWheel(Wheel& w, float appliedV, bool otherCounting, float dt_s) {
   } else if (delta > 0) {
     w.silentMs = 0;
   }
-  // Self-healing: a faulty encoder that counts steadily again is trusted again.
+
   if (w.faulty && delta > 0) {
     w.recoverEdges += delta;
     if (w.recoverEdges >= ENC_RECOVER_EDGES) {
@@ -86,13 +79,13 @@ void updateWheel(Wheel& w, float appliedV, bool otherCounting, float dt_s) {
   }
 }
 
-}  // namespace
+}
 
 namespace encoders {
 
 void begin() {
   for (Wheel* w : {&g_left, &g_right}) {
-    pinMode(w->pin, INPUT_PULLUP);   // hall outputs are often open collector
+    pinMode(w->pin, INPUT_PULLUP);
     w->edges = 0;
     w->lastEdges = 0;
     attachInterruptArg(w->pin, edgeIsr, w, CHANGE);
@@ -105,8 +98,6 @@ void update(float dt_s) {
   updateWheel(g_left, motors::appliedLeftV(), rightCounting, dt_s);
   updateWheel(g_right, motors::appliedRightV(), leftCounting, dt_s);
 
-  // Both silent while both motors are clearly driven: both encoders dead
-  // (supply or ground lost). Blocked wheels are caught by stuck detection.
   const bool bothDriven = fabsf(motors::model().speedFor(motors::appliedLeftV())) >= ENC_DRIVEN_MIN_MM_S &&
                           fabsf(motors::model().speedFor(motors::appliedRightV())) >= ENC_DRIVEN_MIN_MM_S;
   if (!leftCounting && !rightCounting && bothDriven) {
@@ -139,4 +130,4 @@ void clearFaults() {
   g_bothSilentMs = 0;
 }
 
-}  // namespace encoders
+}

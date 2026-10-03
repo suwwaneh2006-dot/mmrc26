@@ -1,18 +1,3 @@
-﻿// =============================================================================
-//  sim/test_runner.cpp - batch verification of the maze brain.
-//
-//  For every maze file given on the command line (mazefiles text format):
-//    * runs the full mouse program (search, returns, speed runs) through the
-//      fake mms API, normally AND mirrored (maze extending to the left),
-//    * fails on any crash into a wall, unreached goal/start, wall conflict or
-//      post-rule violation in the learned map,
-//    * compares the final verified speed path with the true optimum.
-//
-//  Also generates 10x10 MMRC-style island mazes:
-//    test_runner --gen <count> <outdir>
-//  Usage:
-//    test_runner [--quiet] maze1.txt maze2.txt ...   (or @listfile)
-// =============================================================================
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,11 +13,8 @@
 
 namespace {
 
-// ---------------------------------------------------------------------------
-//  Island maze generator (10x10, centre 2x2 goal with exactly one entrance)
-// ---------------------------------------------------------------------------
 int wallsAtPost(const TrueMaze& m, int i, int j) {
-  // Interior post (i, j) touches 4 walls.
+
   return m.wall[i - 1][j - 1][mm::EAST] + m.wall[i - 1][j][mm::EAST] + m.wall[i - 1][j - 1][mm::NORTH] +
          m.wall[i][j - 1][mm::NORTH];
 }
@@ -56,8 +38,6 @@ TrueMaze generateIsland(int n, unsigned seed) {
     }
   }
 
-  // Randomised depth-first spanning tree over the non-goal cells. The start
-  // cell keeps its east wall (walls on three sides, exit to the north).
   std::vector<int> stack;
   std::vector<bool> seen(static_cast<size_t>(n * n), false);
   stack.push_back(0);
@@ -83,7 +63,6 @@ TrueMaze generateIsland(int n, unsigned seed) {
     stack.push_back(nx * n + ny);
   }
 
-  // Exactly one entrance into the goal island.
   struct Opening { int x, y; mm::Dir d; };
   std::vector<Opening> doors;
   for (int x = g0; x <= g1; ++x) {
@@ -97,8 +76,6 @@ TrueMaze generateIsland(int n, unsigned seed) {
   const Opening& door = doors[rng() % doors.size()];
   m.setWall(door.x, door.y, door.d, false);
 
-  // Add loops (so the shortest path is not the search path), keeping the
-  // post rule: never remove the last wall touching an interior post.
   const int loops = n * n / 8;
   for (int tries = 0, added = 0; added < loops && tries < 2000; ++tries) {
     const int x = static_cast<int>(rng() % static_cast<unsigned>(n));
@@ -106,9 +83,9 @@ TrueMaze generateIsland(int n, unsigned seed) {
     const mm::Dir d = (rng() & 1u) ? mm::EAST : mm::NORTH;
     const int nx = x + mm::dx(d), ny = y + mm::dy(d);
     if (nx >= n || ny >= n || !m.wall[x][y][d]) continue;
-    if (isGoal(x, y) || isGoal(nx, ny)) continue;          // island keeps one door
-    if (x == 0 && y == 0 && d == mm::EAST) continue;       // start cell rule
-    // Posts at both ends of the wall.
+    if (isGoal(x, y) || isGoal(nx, ny)) continue;
+    if (x == 0 && y == 0 && d == mm::EAST) continue;
+
     int p1i, p1j, p2i, p2j;
     if (d == mm::EAST) { p1i = x + 1; p1j = y; p2i = x + 1; p2j = y + 1; }
     else               { p1i = x; p1j = y + 1; p2i = x + 1; p2j = y + 1; }
@@ -137,16 +114,13 @@ int goalEntrances(const TrueMaze& m, const mm::CellSet& goal) {
   return doors;
 }
 
-// ---------------------------------------------------------------------------
-//  One maze, one orientation
-// ---------------------------------------------------------------------------
 struct Outcome {
   bool ok = false;
   std::string why;
   int searchCells = 0;
   float speedS = 0.0f, optimalS = 0.0f;
-  bool  pending = false;   // exploring would still pay off at the end
-  float finalS = 0.0f;     // verified fastest path on the learned map at the end
+  bool  pending = false;
+  float finalS = 0.0f;
 };
 
 Outcome runOne(const TrueMaze& canonical, const mm::CellSet& goal, bool mirror) {
@@ -178,7 +152,7 @@ Outcome runOne(const TrueMaze& canonical, const mm::CellSet& goal, bool mirror) 
     o.why = "wall conflicts with perfect sensors";
     return o;
   }
-  // The learned map must agree with the true maze wherever it is known.
+
   const mm::Maze& learned = mouseMaze();
   for (int x = 0; x < canonical.width; ++x) {
     for (int y = 0; y < canonical.height; ++y) {
@@ -192,7 +166,7 @@ Outcome runOne(const TrueMaze& canonical, const mm::CellSet& goal, bool mirror) 
       }
     }
   }
-  // True optimum on the fully known maze.
+
   static mm::Maze full;
   static mm::Router router(full);
   static mm::Path best;
@@ -200,8 +174,7 @@ Outcome runOne(const TrueMaze& canonical, const mm::CellSet& goal, bool mirror) 
   full.setGoal(goal);
   const mm::Cell start = {0, 0};
   if (router.fastest(start, mm::NORTH, goal, false, mouseTimeModel(1), best)) o.optimalS = best.timeS;
-  // Verified fastest path on the LEARNED map after all runs (what the next
-  // speed run would drive).
+
   static mm::Maze learnedCopy;
   static mm::Router learnedRouter(learnedCopy);
   learnedCopy = learned;
@@ -211,8 +184,7 @@ Outcome runOne(const TrueMaze& canonical, const mm::CellSet& goal, bool mirror) 
     return o;
   }
   o.finalS = best.timeS;
-  // Design guarantee: once exploring no longer pays, the verified path is
-  // within 1/(1-gain) of the optimistic one, which is <= the true optimum.
+
   if (!o.pending && o.finalS > o.optimalS / (1.0f - PLAN_EXPLORE_GAIN) + 1e-3f) {
     o.why = "verified path exceeds the exploration bound";
     return o;
@@ -241,7 +213,7 @@ std::vector<std::string> expandArgs(int argc, char** argv, bool& quiet) {
   return files;
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
   if (argc >= 4 && std::strcmp(argv[1], "--gen") == 0) {
@@ -286,8 +258,7 @@ int main(int argc, char** argv) {
       tmp.reset(m.width, m.height);
       goal = tmp.goal();
     }
-    // A file whose goal cannot be reached even with full knowledge is a data
-    // problem (e.g. training mazes with a small active area), not a brain bug.
+
     {
       static mm::Maze full;
       static mm::Router router(full);
@@ -346,5 +317,3 @@ int main(int argc, char** argv) {
   for (const std::string& s : failures) std::printf("FAIL %s\n", s.c_str());
   return failures.empty() ? 0 : 1;
 }
-
-

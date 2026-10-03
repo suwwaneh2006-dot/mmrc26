@@ -1,11 +1,4 @@
 @echo off
-rem ===========================================================================
-rem  Batch verification of the maze brain (no GUI needed):
-rem   1. builds test_runner.exe (brain + fake mms API),
-rem   2. generates 20 MMRC-style 10x10 island mazes into mazes\generated,
-rem   3. runs every maze (mazefiles classic + halfsize + training + generated),
-rem      normal and mirrored, and prints a summary.
-rem ===========================================================================
 setlocal
 cd /d "%~dp0"
 set GXX=g++

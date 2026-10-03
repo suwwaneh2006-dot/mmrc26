@@ -1,6 +1,3 @@
-// =============================================================================
-//  modes.cpp - see modes.h
-// =============================================================================
 #include "modes.h"
 
 #include <Preferences.h>
@@ -22,15 +19,12 @@ constexpr uint8_t MODE_COUNT = 7;
 constexpr float   MOTOR_TEST_V = 2.0f;
 constexpr uint32_t MOTOR_TEST_PHASE_MS = 1500;
 constexpr uint32_t BATT_WARN_PERIOD_MS = 10000;
-constexpr uint32_t LOG_PERIOD_MS = 5;      // mode 6 sample period
-constexpr uint32_t LOG_TAIL_MS = 400;      // keep logging after the stop
+constexpr uint32_t LOG_PERIOD_MS = 5;
+constexpr uint32_t LOG_TAIL_MS = 400;
 
 uint8_t g_sonarMask = 0;
 bool    g_imuOk = false;
 
-// ---------------------------------------------------------------------------
-//  Helpers
-// ---------------------------------------------------------------------------
 bool allPartsOk() {
   for (uint8_t i = 0; i < sonar::COUNT; ++i) {
     if (!(g_sonarMask & (1u << i)) || sonar::faulty(static_cast<sonar::Id>(i))) return false;
@@ -38,7 +32,6 @@ bool allPartsOk() {
   return g_imuOk && imu::ok();
 }
 
-// First error code to report (beeped), 0 if none.
 uint8_t errorCode() {
   if (!(g_sonarMask & (1u << sonar::FRONT)) || sonar::faulty(sonar::FRONT)) return ui::ERR_SONAR_FRONT;
   if (!(g_sonarMask & (1u << sonar::LEFT))  || sonar::faulty(sonar::LEFT))  return ui::ERR_SONAR_LEFT;
@@ -59,14 +52,12 @@ void waitBeeps() {
   while (ui::beepBusy()) sched::service();
 }
 
-// Front range in mm after letting a few fresh readings arrive, -1 if no wall.
 float settledFrontMm() {
   sched::waitMs(150);
   const sonar::Reading r = sonar::read(sonar::FRONT);
   return r.inRange ? r.mm : -1.0f;
 }
 
-// Wait for the button: short press = go (true), long press = cancel (false).
 bool waitStartPress() {
   ui::clearEvents();
   ui::led(ui::Led::ON);
@@ -85,7 +76,6 @@ bool armMotors() {
   return motors::enable();
 }
 
-// Wait for the current motion to finish; a short press stops it.
 motion::Result waitMotion() {
   ui::clearEvents();
   while (motion::busy()) {
@@ -102,7 +92,6 @@ void reportFaultIfAny() {
   }
 }
 
-// Read the number of clicks. Returns 0 on a long press.
 uint8_t readClicks() {
   ui::clearEvents();
   uint8_t n = 0;
@@ -139,9 +128,6 @@ void printReading(const char* tag, sonar::Id id) {
   DBG_PRINTF("(%s) ", s.faulty ? "FAULT" : "ok");
 }
 
-// ---------------------------------------------------------------------------
-//  Mode 1: sensor dump
-// ---------------------------------------------------------------------------
 void modeSensorDump() {
   DBG_PRINTF("\n== MODE 1: sensor dump (short press = exit) ==\n");
   DBG_PRINTF("W = wall flag, NW = no wall in range. Turn the robot LEFT by hand: hdg must increase.\n");
@@ -182,9 +168,6 @@ void modeSensorDump() {
   }
 }
 
-// ---------------------------------------------------------------------------
-//  Mode 2: motor direction test (wheels in the air)
-// ---------------------------------------------------------------------------
 void modeMotorTest() {
   struct Phase { float l, r; const char* text; };
   const Phase phases[] = {
@@ -218,7 +201,7 @@ void modeMotorTest() {
     }
     motion::stop();
     waitMotion();
-    // The encoder of each driven wheel must have counted, in the driven direction.
+
     const float dl = encoders::leftMm() - l0, dr = encoders::rightMm() - r0;
     const bool lOk = p.l == 0.0f ? fabsf(dl) < 5.0f : (dl * p.l > 0.0f && fabsf(dl) > 20.0f);
     const bool rOk = p.r == 0.0f ? fabsf(dr) < 5.0f : (dr * p.r > 0.0f && fabsf(dr) > 20.0f);
@@ -233,9 +216,6 @@ void modeMotorTest() {
   else ui::soundOk();
 }
 
-// ---------------------------------------------------------------------------
-//  Mode 3: straight 5 cells at T1
-// ---------------------------------------------------------------------------
 void modeStraight5() {
   const float dist = 5.0f * CELL_PITCH_MM;
   DBG_PRINTF("\n== MODE 3: straight %.0f mm (5 cells) at T1 ==\n", dist);
@@ -269,9 +249,6 @@ void modeStraight5() {
   else ui::soundAbort();
 }
 
-// ---------------------------------------------------------------------------
-//  Mode 4: pivot 4x90 deg left
-// ---------------------------------------------------------------------------
 void modePivot4() {
   DBG_PRINTF("\n== MODE 4: pivot 4x90 deg left at T1 ==\n");
   const float f0 = settledFrontMm();
@@ -300,22 +277,17 @@ void modePivot4() {
   else ui::soundAbort();
 }
 
-// ---------------------------------------------------------------------------
-//  Mode 5: auto-calibration of the volts -> velocity model
-// ---------------------------------------------------------------------------
 struct CalStep {
   float volts;
-  float mm_s;      // measured steady-state speed, 0 if it did not move
-  float tau_s;     // estimated lag, < 0 if unknown
-  bool  aborted;   // user / fault
+  float mm_s;
+  float tau_s;
+  bool  aborted;
 };
 
 constexpr int CAL_MAX_SAMPLES = 160;
 float g_calT[CAL_MAX_SAMPLES];
 float g_calD[CAL_MAX_SAMPLES];
 
-// Drive back (path is known clear: the robot just came from there) until the
-// front wall is at CAL_START_MM again.
 bool calReverseToStart() {
   const float f = settledFrontMm();
   if (f > 0.0f && f >= CAL_START_MM - 20.0f) return true;
@@ -337,7 +309,6 @@ bool calReverseToStart() {
   return ok && motors::faultCode() == Fault::NONE;
 }
 
-// Least-squares line d = a + b * t over samples with t >= tMin.
 bool fitLine(int n, float tMin, float& a, float& b, int& used) {
   double st = 0, sd = 0, stt = 0, std_ = 0;
   used = 0;
@@ -415,8 +386,7 @@ CalStep calRunStep(float volts) {
   int used = 0;
   if (!fitLine(n, CAL_SETTLE_MS * 1e-3f, a, b, used) || -b < CAL_MIN_SPEED_MM_S) return out;
   out.mm_s = -b;
-  // Steady state of a first-order lag: d(t) = d0 - v * (t - L), so the fitted
-  // line crosses d0 at t = L. L = tau + half the soft-start ramp time.
+
   const float lag = (a - d0) / out.mm_s;
   out.tau_s = lag - 0.5f * volts / MOTOR_SLEW_V_PER_S;
   DBG_PRINTF("  %.2f V -> %.0f mm/s (%d samples, lag %.0f ms, tau %.0f ms)\n", volts, out.mm_s, used,
@@ -466,7 +436,6 @@ void modeAutoCal() {
     return;
   }
 
-  // Build the table: dead-band point, then strictly increasing measured points.
   VelocityModel m = motors::defaultModel();
   float pv[CAL_STEP_COUNT], ps[CAL_STEP_COUNT], taus[CAL_STEP_COUNT];
   int np = 0, nt = 0;
@@ -476,7 +445,7 @@ void modeAutoCal() {
       if (np == 0) highestStill = steps[i].volts;
       continue;
     }
-    if (np > 0 && steps[i].mm_s <= ps[np - 1]) continue;   // slip / noise: skip
+    if (np > 0 && steps[i].mm_s <= ps[np - 1]) continue;
     pv[np] = steps[i].volts;
     ps[np] = steps[i].mm_s;
     ++np;
@@ -487,8 +456,7 @@ void modeAutoCal() {
     ui::soundError();
     return;
   }
-  // Dead-band: extrapolate the first two points to zero speed, never below a
-  // voltage that was observed not to move the robot.
+
   float v0 = pv[0] - ps[0] * (pv[1] - pv[0]) / (ps[1] - ps[0]);
   v0 = fmaxf(v0, highestStill);
   v0 = fminf(fmaxf(v0, 0.0f), pv[0] - 0.05f);
@@ -501,7 +469,7 @@ void modeAutoCal() {
     m.mm_s[m.count] = ps[i];
     ++m.count;
   }
-  // Median of the lag estimates (robust to one bad step).
+
   for (int i = 1; i < nt; ++i) {
     for (int j = i; j > 0 && taus[j] < taus[j - 1]; --j) {
       const float tmp = taus[j];
@@ -524,9 +492,6 @@ void modeAutoCal() {
   }
 }
 
-// ---------------------------------------------------------------------------
-//  Mode 6: one-cell step test
-// ---------------------------------------------------------------------------
 struct LogRow {
   uint16_t tMs;
   float sRef, vRef, sEst, vEst, sigma, leftV, rightV, heading, frontMm, leftMm, rightMm;
@@ -576,9 +541,6 @@ void modeStepTest() {
   else ui::soundAbort();
 }
 
-// ---------------------------------------------------------------------------
-//  Mode dispatch
-// ---------------------------------------------------------------------------
 void runMode(uint8_t n) {
   ui::beep(n, 80, 150);
   waitBeeps();
@@ -591,7 +553,7 @@ void runMode(uint8_t n) {
     modeSensorDump();
     return;
   }
-  // Modes that drive need a healthy battery; 3-6 also need every sensor.
+
   if (!battery::armAllowed()) {
     DBG_PRINTF("battery %.2f V < %.2f V - refused.\n", battery::volts(), BATT_REFUSE_ARM_V);
     ui::soundError();
@@ -603,7 +565,7 @@ void runMode(uint8_t n) {
     return;
   }
   if (n == 7) {
-    strategy::runMatch();   // has its own start trigger (hand-wave)
+    strategy::runMatch();
     motors::disable();
     return;
   }
@@ -626,7 +588,7 @@ void runMode(uint8_t n) {
   motors::disable();
 }
 
-}  // namespace
+}
 
 namespace modes {
 
@@ -650,7 +612,7 @@ void bootWipeCheck() {
     }
   }
   ui::led(ui::Led::OFF);
-  delay(300);   // let the robot settle after the hand leaves the button
+  delay(300);
   ui::clearEvents();
 }
 
@@ -680,4 +642,4 @@ void menu() {
   DBG_PRINTF("ready: click 1-7 to select a mode.\n");
 }
 
-}  // namespace modes
+}

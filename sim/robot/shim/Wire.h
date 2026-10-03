@@ -1,7 +1,3 @@
-// =============================================================================
-//  sim/robot/shim/Wire.h - I2C master API; the simulated bus has one device:
-//  an MPU6050 at 0x68 whose gyro Z follows the simulated robot (hal.cpp).
-// =============================================================================
 #pragma once
 
 #include "Arduino.h"

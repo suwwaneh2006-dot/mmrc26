@@ -1,9 +1,3 @@
-# =============================================================================
-#  sim/robot/run_matrix.ps1 - closed-loop match simulation over many mazes.
-#  For every generated 10x10 island maze: normal / mirrored, true motors at
-#  1.00 / 0.85 / 1.15 x the firmware's assumed speed. Prints one row per run.
-#  Usage (PowerShell):  .\run_matrix.ps1 [-Extra "--calibrate"]
-# =============================================================================
 param([string]$Extra = "", [int]$SeedOffset = 0)
 Set-Location $PSScriptRoot
 $rows = @()

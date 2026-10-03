@@ -1,13 +1,7 @@
-// =============================================================================
-//  ui.cpp - see ui.h
-// =============================================================================
 #include "ui.h"
 
 namespace {
 
-// ---------------------------------------------------------------------------
-//  Button
-// ---------------------------------------------------------------------------
 constexpr uint8_t EVENT_QUEUE = 8;
 ui::Button g_events[EVENT_QUEUE];
 uint8_t  g_evHead = 0, g_evCount = 0;
@@ -19,7 +13,7 @@ uint32_t g_pressStartMs = 0;
 bool     g_longFired = false;
 
 void pushEvent(ui::Button b) {
-  if (g_evCount == EVENT_QUEUE) return;   // drop when full
+  if (g_evCount == EVENT_QUEUE) return;
   g_events[(g_evHead + g_evCount) % EVENT_QUEUE] = b;
   ++g_evCount;
 }
@@ -45,9 +39,6 @@ void updateButton(uint32_t now) {
   }
 }
 
-// ---------------------------------------------------------------------------
-//  Buzzer: a queue of patterns, each "count x (on, off)".
-// ---------------------------------------------------------------------------
 struct Pattern {
   uint8_t  count;
   uint16_t onMs;
@@ -55,7 +46,7 @@ struct Pattern {
   bool     low;
 };
 constexpr uint8_t  PATTERN_QUEUE = 6;
-constexpr uint16_t PATTERN_PAUSE_MS = 350;   // silence between queued patterns
+constexpr uint16_t PATTERN_PAUSE_MS = 350;
 Pattern  g_pat[PATTERN_QUEUE];
 uint8_t  g_patHead = 0, g_patCount = 0;
 uint8_t  g_beepsLeft = 0;
@@ -75,7 +66,7 @@ void buzzer(bool on, bool low) {
 void updateBuzzer(uint32_t now) {
   if (g_patCount == 0 || static_cast<int32_t>(now - g_buzzNextMs) < 0) return;
   Pattern& p = g_pat[g_patHead];
-  if (g_inPause) {                       // gap after a finished pattern
+  if (g_inPause) {
     g_inPause = false;
     g_patHead = (g_patHead + 1) % PATTERN_QUEUE;
     --g_patCount;
@@ -97,11 +88,6 @@ void updateBuzzer(uint32_t now) {
   }
 }
 
-// ---------------------------------------------------------------------------
-//  Status indication. The on-board LED pin (GPIO 22) now carries the right
-//  wheel encoder, so there is no LED: the steady patterns are silent and an
-//  error code is BEEPED (code x low beep) every ERROR_BEEP_PERIOD_MS.
-// ---------------------------------------------------------------------------
 constexpr uint32_t ERROR_BEEP_PERIOD_MS = 6000;
 ui::Led  g_ledMode = ui::Led::OFF;
 uint8_t  g_ledCode = 0;
@@ -115,7 +101,7 @@ void updateLed(uint32_t now) {
   }
 }
 
-}  // namespace
+}
 
 namespace ui {
 
@@ -125,8 +111,7 @@ void begin() {
     pinMode(PIN_BUZZER, OUTPUT);
     digitalWrite(PIN_BUZZER, LOW);
   } else {
-    // Different frequency than the motors -> gets its own LEDC timer, so
-    // changing the tone never disturbs the 20 kHz motor PWM.
+
     ledcAttach(PIN_BUZZER, BUZZER_TONE_HZ, BUZZER_PWM_BITS);
     ledcWrite(PIN_BUZZER, 0);
   }
@@ -181,10 +166,10 @@ void soundCalSaved()    { beep(5, 40, 60); }
 void soundBatteryWarn() { beep(2, 40, 60, true); }
 
 void led(Led mode, uint8_t code) {
-  // A new error code is beeped at once, then every ERROR_BEEP_PERIOD_MS.
+
   if (mode == Led::CODE && (mode != g_ledMode || code != g_ledCode)) g_lastCodeBeepMs = millis() - ERROR_BEEP_PERIOD_MS;
   g_ledMode = mode;
   g_ledCode = code;
 }
 
-}  // namespace ui
+}

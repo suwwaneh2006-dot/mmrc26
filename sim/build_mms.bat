@@ -1,9 +1,4 @@
 @echo off
-rem ===========================================================================
-rem  Builds mouse.exe for the mms simulator from the UNCHANGED firmware brain
-rem  (..\main\maze.cpp). Use this file as the mms "Build Command".
-rem  Needs MinGW g++ (C:\MinGW\bin). -static: mouse.exe needs no MinGW DLLs.
-rem ===========================================================================
 setlocal
 cd /d "%~dp0"
 set GXX=g++

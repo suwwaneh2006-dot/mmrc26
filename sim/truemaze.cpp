@@ -1,14 +1,8 @@
-// =============================================================================
-//  sim/truemaze.cpp - see truemaze.h
-// =============================================================================
 #include "truemaze.h"
 
 #include <fstream>
 #include <vector>
 
-// ---------------------------------------------------------------------------
-//  TrueMaze (mazefiles text format: posts 'o', '---' and '|' walls, 'G' goal)
-// ---------------------------------------------------------------------------
 void TrueMaze::setWall(int x, int y, mm::Dir d, bool present) {
   wall[x][y][d] = present;
   const int nx = x + mm::dx(d), ny = y + mm::dy(d);
@@ -58,7 +52,7 @@ bool TrueMaze::load(const std::string& path, std::string& error) {
       }
     }
   }
-  // Boundary is always walled.
+
   for (int x = 0; x < width; ++x) {
     wall[x][0][mm::SOUTH] = true;
     wall[x][height - 1][mm::NORTH] = true;
@@ -74,8 +68,8 @@ bool TrueMaze::save(const std::string& path) const {
   std::ofstream out(path.c_str());
   if (!out) return false;
   for (int r = 0; r <= height; ++r) {
-    // Horizontal wall line above text row r (cell row y = height - r).
-    const int yAbove = height - r;   // cell whose SOUTH wall this is (if < height)
+
+    const int yAbove = height - r;
     std::string h;
     for (int x = 0; x < width; ++x) {
       bool w;
@@ -133,4 +127,3 @@ void TrueMaze::toMaze(mm::Maze& m) const {
   }
   if (goal.count() > 0) m.setGoal(goal);
 }
-

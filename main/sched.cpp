@@ -1,6 +1,3 @@
-// =============================================================================
-//  sched.cpp - see sched.h
-// =============================================================================
 #include "sched.h"
 
 #include "battery.h"
@@ -28,7 +25,6 @@ void controlTick(float dt_s) {
   motors::update(dt_s);
   motors::feedWatchdog();
 
-  // Safety checks that apply whenever the bridge is powered.
   if (motors::enabled()) {
     if (battery::belowCutoff()) motors::fault(Fault::BATTERY);
     if (!imu::ok()) motors::fault(Fault::IMU);
@@ -36,7 +32,7 @@ void controlTick(float dt_s) {
   ++g_ticks;
 }
 
-}  // namespace
+}
 
 namespace sched {
 
@@ -52,18 +48,16 @@ void service() {
   if (static_cast<int32_t>(now - g_nextTickUs) >= 0) {
     const uint32_t late = now - g_nextTickUs;
     if (g_afterBlocking) {
-      g_nextTickUs = now;   // planned pause: not an overrun
+      g_nextTickUs = now;
     } else {
       if (late > g_maxLateUs) g_maxLateUs = late;
       if (late > CONTROL_LATE_US) {
         ++g_overruns;
         if (late > CONTROL_OVERRUN_FAULT_US && motors::enabled()) motors::fault(Fault::LOOP_OVERRUN);
-        g_nextTickUs = now;   // re-synchronise instead of bursting catch-up ticks
+        g_nextTickUs = now;
       }
     }
-    // Real elapsed time, clamped so one hiccup cannot inject a huge step.
-    // After a planned blocking section the true (longer) time is used so the
-    // estimator integrates the distance driven meanwhile.
+
     float dt = (now - g_lastTickUs) * 1e-6f;
     const float maxDt = g_afterBlocking ? BLOCKING_SECTION_MAX_MS * 1e-3f : 5.0f * CONTROL_TICK_S;
     if (dt > maxDt) dt = maxDt;
@@ -98,4 +92,4 @@ uint32_t overruns()  { return g_overruns; }
 uint32_t maxLateUs() { return g_maxLateUs; }
 uint32_t tickCount() { return g_ticks; }
 
-}  // namespace sched
+}

@@ -1,6 +1,3 @@
-// =============================================================================
-//  strategy.cpp - see strategy.h
-// =============================================================================
 #include "strategy.h"
 
 #include <Preferences.h>
@@ -24,24 +21,19 @@ using mm::Explorer;
 enum class Outcome : uint8_t { ARRIVED, ABORTED, NO_PATH };
 enum class Trigger : uint8_t { GO, RESCUE, EXIT };
 
-// The maze brain (static storage, same objects as verified in /sim).
 mm::Maze     g_maze;
 mm::Router   g_router(g_maze);
 mm::Explorer g_explorer(g_maze, g_router);
 mm::Path     g_scratchPath;
 bool         g_mirror = false;
 
-// Per-run bookkeeping
 const char* g_abortReason = "";
-uint16_t g_seenConflicts = 0;   // explorer conflicts already accounted
-int      g_loopConflicts = 0;   // conflicts during the current run + return
-int      g_postViolations = 0;  // post-rule violations already accounted
-float    g_nextStartS = 0.0f;   // axle position (rel. to cell centre) for the next straight
+uint16_t g_seenConflicts = 0;
+int      g_loopConflicts = 0;
+int      g_postViolations = 0;
+float    g_nextStartS = 0.0f;
 float    g_nextSigma = START_SIGMA_MM;
 
-// ---------------------------------------------------------------------------
-//  Time models and path queries
-// ---------------------------------------------------------------------------
 mm::TimeModel tierModel(int tier) {
   const SpeedTier& t = TIERS[tier];
   return mm::TimeModel::fromProfile(CELL_PITCH_MM, t.speed_mm_s, t.accel_mm_s2, t.turnRate_dps, TURN_ACCEL_DPS2,
@@ -50,7 +42,6 @@ mm::TimeModel tierModel(int tier) {
 
 const mm::Cell START_CELL = {0, 0};
 
-// Planned time of the verified fastest path start->goal (+ back), < 0 if none.
 float verifiedLoopS(int tier) {
   const mm::TimeModel tm = tierModel(tier);
   if (!g_router.fastest(START_CELL, mm::NORTH, g_maze.goal(), false, tm, g_scratchPath)) return -1.0f;
@@ -61,9 +52,6 @@ float verifiedLoopS(int tier) {
   return out + g_scratchPath.timeS;
 }
 
-// Face of the first MAP-KNOWN wall straight ahead of cell c (which is at run
-// index k), in the run frame. -1 if an unknown wall comes first. (The range
-// limit FRONT_TRUST_MM is applied per reading by the estimator.)
 float frontFace(mm::Cell c, mm::Dir h, int k) {
   for (int guard = 0; guard < MAZE_SIZE_CELLS + 1; ++guard) {
     const float face = k * CELL_PITCH_MM + HALF_CELL_INNER_MM;
@@ -76,16 +64,13 @@ float frontFace(mm::Cell c, mm::Dir h, int k) {
   return -1.0f;
 }
 
-// ---------------------------------------------------------------------------
-//  Map mirror in NVS (survives brownout resets; wiped by the boot long-press)
-// ---------------------------------------------------------------------------
 struct MapRecord {
   uint8_t mirror;
   uint8_t blob[mm::Maze::SERIAL_BYTES];
 };
 MapRecord g_record;
 
-void writeRecord() {   // runs inside sched::blockingSection()
+void writeRecord() {
   Preferences prefs;
   if (prefs.begin(NVS_MAP_NAMESPACE, false)) {
     prefs.putBytes("map", &g_record, sizeof(g_record));
@@ -94,7 +79,7 @@ void writeRecord() {   // runs inside sched::blockingSection()
 }
 
 void saveMap(bool moving) {
-  if (moving && !NVS_MIRROR_EVERY_CELL) return;   // saved at the next stop instead
+  if (moving && !NVS_MIRROR_EVERY_CELL) return;
   g_record.mirror = g_mirror ? 1 : 0;
   if (g_maze.serialize(g_record.blob, sizeof(g_record.blob)) == 0) return;
   sched::blockingSection(&writeRecord);
@@ -111,18 +96,10 @@ bool loadMap(bool& mirror) {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-//  Sensing
-// ---------------------------------------------------------------------------
 struct Walls {
   bool l, f, r;
 };
 
-// One side wall of the cell whose centre is at centreS (run frame). The
-// newest RAW reading decides if it was taken while the sensor faced this
-// cell's wall segment (the filtered flag lags ~100 ms behind a post, which
-// at the read point can still report the previous cell's wall). Otherwise
-// the filtered, hysteresis wall flag is used.
 bool sideWall(sonar::Id id, float expectMm, float sensorX, float centreS, uint32_t maxAgeMs) {
   const sonar::Reading r = sonar::read(id);
   if (r.valid && sonar::ageMs(id) <= maxAgeMs) {
@@ -135,8 +112,6 @@ bool sideWall(sonar::Id id, float expectMm, float sensorX, float centreS, uint32
   return r.wall;
 }
 
-// Walls of the current cell. centreS = position of that cell's centre in the
-// current run frame; the axle is at estimator::s() (at rest: on the centre).
 Walls readWalls(float centreS, uint32_t maxAgeMs) {
   Walls w;
   const sonar::Reading f = sonar::read(sonar::FRONT);
@@ -148,9 +123,6 @@ Walls readWalls(float centreS, uint32_t maxAgeMs) {
   return w;
 }
 
-// ---------------------------------------------------------------------------
-//  Abort handling
-// ---------------------------------------------------------------------------
 void accountConflicts(int newOnes) {
   for (int i = 0; i < newOnes; ++i) estimator::inflate(CONFLICT_SIGMA_MM);
   g_loopConflicts += newOnes;
@@ -163,7 +135,6 @@ void syncExplorerConflicts() {
   g_seenConflicts = c;
 }
 
-// Checked continuously while moving. Returns true (motion stopped) on abort.
 bool abortRequested() {
   const char* why = nullptr;
   if (ui::event() == ui::Button::SHORT) why = "button (touch)";
@@ -177,7 +148,6 @@ bool abortRequested() {
   return true;
 }
 
-// Wait for the current motion; false (with a reason) unless it completed.
 bool waitMotion() {
   while (motion::busy()) {
     sched::service();
@@ -190,9 +160,6 @@ bool waitMotion() {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-//  Primitive manoeuvres (robot at rest on a cell centre)
-// ---------------------------------------------------------------------------
 bool alignToFrontWall() {
   motion::alignFront();
   if (!waitMotion()) return false;
@@ -201,8 +168,6 @@ bool alignToFrontWall() {
   return true;
 }
 
-// Sideways offset at rest from the side walls (+ = robot left of centre).
-// False if no side wall is seen.
 bool lateralAtRest(float& lat) {
   float sum = 0.0f;
   int n = 0;
@@ -221,10 +186,6 @@ bool lateralAtRest(float& lat) {
   return true;
 }
 
-// A pivot only clears the walls near the corridor centre. If the robot stands
-// too far to one side: turn RECENTRE_ANGLE_DEG towards the near wall, back up
-// (moves it sideways towards the centre), turn back square, and drive forward
-// the same along-track distance again (or align on the front wall).
 bool recentreForPivot() {
   if (!PIVOT_RECENTRE) return true;
   float lat;
@@ -245,8 +206,7 @@ bool recentreForPivot() {
   if (wallAhead) {
     motion::alignFront();
   } else {
-    // The axle is now back*cos(angle) BEHIND the cell centre: start the run
-    // frame there so position fixes snap to the right cell boundaries.
+
     const float behind = back * cosf(angleRad);
     motion::runBegin(TIERS[0], -behind, ALIGNED_SIGMA_MM);
     motion::runExtend(behind);
@@ -262,7 +222,6 @@ bool pivotPhysical(float angleDeg, const SpeedTier& tier) {
   return true;
 }
 
-// Execute an explorer turn (robot frame) at rest; aligns on a wall ahead first.
 bool turnFor(Action a, bool wallAhead) {
   if (a == Action::FORWARD) return true;
   if (wallAhead && !alignToFrontWall()) return false;
@@ -270,7 +229,6 @@ bool turnFor(Action a, bool wallAhead) {
   return pivotPhysical(angle, TIERS[0]);
 }
 
-// Step the explorer with the walls just read, account conflicts, save map.
 Action stepExplorer(const Walls& w, bool moving) {
   const mm::Cell here = g_explorer.pos();
   const mm::Dir heading = g_explorer.heading();
@@ -278,7 +236,7 @@ Action stepExplorer(const Walls& w, bool moving) {
   DBG_PRINTF("cell (%d,%d) facing %c: walls L%d F%d R%d -> %s\n", here.x, here.y, mm::dirChar(heading), w.l ? 1 : 0,
              w.f ? 1 : 0, w.r ? 1 : 0, mm::actionName(a));
   syncExplorerConflicts();
-  // Consistency check (spec: only as a check): a post with no wall at all.
+
   const int pv = g_maze.postViolations();
   if (pv > g_postViolations) accountConflicts(pv - g_postViolations);
   g_postViolations = pv;
@@ -286,33 +244,24 @@ Action stepExplorer(const Walls& w, bool moving) {
   return a;
 }
 
-// ---------------------------------------------------------------------------
-//  Exploring run (search to goal, or exploring return): one cell at a time,
-//  continuous motion on straights, walls read at each cell's read point.
-// ---------------------------------------------------------------------------
 Outcome exploreRun(Explorer::Target target, bool exploreForSpeed) {
   const SpeedTier& tier = TIERS[0];
   g_explorer.startRun(target, exploreForSpeed, tierModel(0), PLAN_EXPLORE_GAIN);
   g_seenConflicts = 0;
 
-  sched::waitMs(STATIONARY_READ_MS);   // fresh readings at rest
+  sched::waitMs(STATIONARY_READ_MS);
   Walls w = readWalls(estimator::s() - g_nextStartS, STATIONARY_READ_MS);
   Action a = stepExplorer(w, false);
 
   while (true) {
     if (a == Action::ARRIVED) return Outcome::ARRIVED;
     if (a == Action::NO_PATH && g_explorer.looped()) {
-      // Wall hugging came back to where it already was with the same heading:
-      // the target is not reachable along this wall (island goal). The map is
-      // fine, so nothing is forgotten.
+
       g_abortReason = "wall follower looped: target not reachable by wall hugging";
       return Outcome::NO_PATH;
     }
     if (a == Action::NO_PATH) {
-      // The map claims the goal/start is sealed off: some "wall present" is
-      // false (misread). Forget all present walls (open ones stay known) so
-      // the next search re-reads them, and stop for a rescue because the
-      // misreading may mean the pose is wrong.
+
       const int n = g_maze.forgetPresentWalls();
       g_postViolations = g_maze.postViolations();
       saveMap(false);
@@ -326,7 +275,6 @@ Outcome exploreRun(Explorer::Target target, bool exploreForSpeed) {
     }
     if (!turnFor(a, w.f)) return Outcome::ABORTED;
 
-    // Drive into the next cell; each FORWARD decision extends by one cell.
     motion::runBegin(tier, g_nextStartS, g_nextSigma);
     motion::runExtend(CELL_PITCH_MM - g_nextStartS);
     g_nextStartS = 0.0f;
@@ -334,7 +282,7 @@ Outcome exploreRun(Explorer::Target target, bool exploreForSpeed) {
     estimator::setFrontWallFace(frontFace(g_explorer.pos(), g_explorer.heading(), 1));
 
     while (true) {
-      bool reached = false;   // read point of run cell j reached while moving
+      bool reached = false;
       while (motion::busy()) {
         sched::service();
         if (abortRequested()) return Outcome::ABORTED;
@@ -344,8 +292,7 @@ Outcome exploreRun(Explorer::Target target, bool exploreForSpeed) {
         }
       }
       if (!reached) {
-        // Stopped on the centre before the read point (a position fix moved
-        // s past it): read the walls at rest instead.
+
         if (motion::result() != motion::Result::DONE) {
           g_abortReason = motion::resultName(motion::result());
           return Outcome::ABORTED;
@@ -359,12 +306,12 @@ Outcome exploreRun(Explorer::Target target, bool exploreForSpeed) {
       if (w.f) estimator::setFrontWallFace(j * CELL_PITCH_MM + HALF_CELL_INNER_MM);
 
       if (a == Action::FORWARD && reached && g_loopConflicts < CONFLICTS_STOP) {
-        motion::runExtend(CELL_PITCH_MM);   // keep rolling
+        motion::runExtend(CELL_PITCH_MM);
         ++j;
         if (!w.f) estimator::setFrontWallFace(frontFace(g_explorer.pos(), g_explorer.heading(), j));
         continue;
       }
-      // Turn, arrival, no path or too many conflicts: stop on this centre.
+
       if (reached && !waitMotion()) return Outcome::ABORTED;
       g_nextSigma = estimator::sigma();
       break;
@@ -372,13 +319,6 @@ Outcome exploreRun(Explorer::Target target, bool exploreForSpeed) {
   }
 }
 
-// ---------------------------------------------------------------------------
-//  Speed run on verified walls (also used for fast returns)
-// ---------------------------------------------------------------------------
-// Conflict check of the side walls of run cell j (map cell c) passed during a
-// speed run. Only readings taken while the sensor faced cell j's wall segment
-// (not a post, not the previous cell) are used: at T4 an 80 ms old reading
-// can be 56 mm behind.
 void checkSideWalls(mm::Cell c, mm::Dir h, int j) {
   struct Side { sonar::Id id; mm::Dir dir; float expect; float x; };
   const mm::Dir physLeft  = g_mirror ? mm::turnRight(h) : mm::turnLeft(h);
@@ -389,11 +329,11 @@ void checkSideWalls(mm::Cell c, mm::Dir h, int j) {
   for (const Side& s : sides) {
     if (sonar::ageMs(s.id) > SIDE_SAMPLE_MAX_AGE_MS) continue;
     const sonar::Reading r = sonar::read(s.id);
-    // The sensor must be inside the segment even if the estimate is 2 sigma off.
+
     const float sensorRel = estimator::sAt(r.tUs) + s.x - j * CELL_PITCH_MM;
     if (fabsf(sensorRel) > CELL_PITCH_MM * 0.5f - SIDE_POST_KEEPOUT_MM - 2.0f * estimator::sigma()) continue;
     const float raw = r.rawMm;
-    // Only unambiguous readings may contradict the map.
+
     const bool near = raw <= s.expect + SIDE_WALL_ON_MARGIN_MM;
     const bool far = raw >= s.expect + SIDE_WALL_OFF_MARGIN_MM;
     if (!near && !far) continue;
@@ -426,7 +366,7 @@ Outcome pathRun(Explorer::Target target, int tierIdx) {
       if (g_maze.hasWall(c, h) && !alignToFrontWall()) return Outcome::ABORTED;
       const float angle = step.turn == 1 ? 90.0f : (step.turn == -1 ? -90.0f : 180.0f);
       if (!pivotPhysical(angle, tier)) return Outcome::ABORTED;
-      // Path turns are in the robot frame; the map is canonical.
+
       const int canonicalTurn = (g_mirror && step.turn != 2) ? -step.turn : step.turn;
       h = canonicalTurn == 1 ? mm::turnLeft(h) : (canonicalTurn == -1 ? mm::turnRight(h) : mm::turnBack(h));
     }
@@ -456,9 +396,6 @@ Outcome pathRun(Explorer::Target target, int tierIdx) {
   return Outcome::ARRIVED;
 }
 
-// ---------------------------------------------------------------------------
-//  Tier policy (spec section 8)
-// ---------------------------------------------------------------------------
 struct TierPolicy {
   int  clean[4] = {0, 0, 0, 0};
   int  maxTier = 3;
@@ -466,7 +403,7 @@ struct TierPolicy {
 
   int choose() const {
     int cap = maxTier;
-    if (!battery::fastAllowed() && cap > 1) cap = 1;   // no T3/T4 on a tired pack
+    if (!battery::fastAllowed() && cap > 1) cap = 1;
     const int safe = cap < 1 ? cap : 1;
     if (clean[1] < CLEAN_LOOPS_BEFORE_HERO) return safe;
     if (!t3Tried && cap >= 2) return 2;
@@ -485,16 +422,13 @@ struct TierPolicy {
       ++clean[tier];
       if (tier == 2) t3Clean = true;
     } else if (tier >= 1) {
-      maxTier = maxTier < tier - 1 ? maxTier : tier - 1;   // drop one tier for the rest of the match
+      maxTier = maxTier < tier - 1 ? maxTier : tier - 1;
     } else {
       maxTier = 0;
     }
   }
 };
 
-// ---------------------------------------------------------------------------
-//  Waiting at the start
-// ---------------------------------------------------------------------------
 void resetPose() {
   g_explorer.setPose(START_CELL, mm::NORTH);
   imu::setHeading(0.0f);
@@ -504,7 +438,6 @@ void resetPose() {
   g_nextSigma = START_SIGMA_MM;
 }
 
-// Hand < TRIGGER_NEAR_MM for TRIGGER_HOLD_MS, then removed -> beep, delay.
 Trigger waitTrigger() {
   ui::clearEvents();
   ui::led(ui::Led::BLINK_SLOW);
@@ -523,7 +456,7 @@ Trigger waitTrigger() {
         if (nearSince == 0) nearSince = millis();
         if (millis() - nearSince >= TRIGGER_HOLD_MS) {
           armed = true;
-          ui::beep(1, 30, 30);   // "hand seen": now take it away
+          ui::beep(1, 30, 30);
         }
       } else {
         nearSince = 0;
@@ -537,8 +470,6 @@ Trigger waitTrigger() {
   }
 }
 
-// After an abort: wait for the operator to put the robot back at the start
-// and short-press (rescue). Long press leaves match mode.
 bool waitRescue() {
   motors::disable();
   ui::soundAbort();
@@ -575,8 +506,6 @@ bool selectMirror() {
   }
 }
 
-// At the start cell after a return: align on the rear (outer) wall, re-zero
-// the gyro bias while still, turn to face north, pause.
 bool startCellRoutine() {
   if (!alignToFrontWall()) return false;
   const uint32_t t0 = millis();
@@ -587,7 +516,6 @@ bool startCellRoutine() {
   return true;
 }
 
-// Robot stopped in the goal: about-turn to face the way back.
 bool goalTurnAround() {
   if (g_maze.hasWall(g_explorer.pos(), g_explorer.heading()) && !alignToFrontWall()) return false;
   if (!pivotPhysical(180.0f, TIERS[0])) return false;
@@ -595,7 +523,7 @@ bool goalTurnAround() {
   return true;
 }
 
-}  // namespace
+}
 
 namespace strategy {
 
@@ -607,7 +535,7 @@ void runMatch() {
   g_mirror = haveMap && storedMirror;
   DBG_PRINTF("map: %s\n", haveMap ? "restored from NVS (wipe it before a new match!)" : "empty");
   selectMirror();
-  if (haveMap && g_mirror != storedMirror) {   // a map is only valid for its own orientation
+  if (haveMap && g_mirror != storedMirror) {
     g_maze.reset(MAZE_SIZE_CELLS, MAZE_SIZE_CELLS);
     saveMap(false);
     ui::soundWiped();
@@ -648,7 +576,6 @@ void runMatch() {
       needTrigger = false;
     }
 
-    // Will the next loop fit in the remaining match time?
     const bool searching = verifiedLoopS(1) < 0.0f;
     const int tier = searching ? 0 : policy.choose();
     const float loopS = searching ? MATCH_SEARCH_EST_S : verifiedLoopS(tier);
@@ -678,7 +605,6 @@ void runMatch() {
       continue;
     }
 
-    // ---- Run to the goal ----
     g_loopConflicts = 0;
     if (!searching) policy.started(tier);
     DBG_PRINTF("run %d: %s at T%d\n", runs + 1, searching ? "SEARCH" : "SPEED", tier + 1);
@@ -695,9 +621,6 @@ void runMatch() {
     if (bestMs == 0 || dt < bestMs) bestMs = dt;
     DBG_PRINTF("  goal reached in %lu ms\n", static_cast<unsigned long>(dt));
 
-    // ---- Return to the start ----
-    // Exploring returns are a flood-fill feature; wall hugging goes home on
-    // the verified path (the search itself verified one) or hugs back.
     const bool explore = !EXPLORE_WALL_HUG && g_explorer.explorationWorthwhile(tierModel(1), PLAN_EXPLORE_GAIN, nullptr);
     const int returnTier = searching ? 1 : tier;
     t0 = millis();
@@ -716,7 +639,6 @@ void runMatch() {
                explore ? "exploring" : "speed");
     saveMap(false);
 
-    // A contradiction at a verified cell counts against the tier.
     if (!searching) policy.finished(tier, g_loopConflicts == 0);
     if (!AUTO_RESTART) needTrigger = true;
   }
@@ -724,4 +646,4 @@ void runMatch() {
   DBG_PRINTF("match mode left: %d runs, %d returns\n", runs, returns);
 }
 
-}  // namespace strategy
+}

@@ -1,8 +1,3 @@
-// =============================================================================
-//  sim/robot/shim/Arduino.h - minimal Arduino-ESP32 API for running the
-//  UNCHANGED firmware on a PC against the simulated robot (hal.cpp).
-//  Only what the firmware and MPU6050_light actually use is provided.
-// =============================================================================
 #pragma once
 
 #include <cstdint>

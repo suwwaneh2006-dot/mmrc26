@@ -1,21 +1,3 @@
-// =============================================================================
-//  sim/robot/robot_sim.cpp - closed-loop match simulation of the COMPLETE
-//  firmware (main.ino + every module, unchanged) on a simulated robot.
-//
-//  A scripted operator does what the team does at the event:
-//    boot -> click 7 times (match mode) -> [short press: mirror] -> long
-//    press (confirm) -> hand-wave in front of the robot -> let it run.
-//    On "ABORT" the operator rescues: robot back to the start, short press,
-//    hand-wave again. The simulation ends when the firmware reports that the
-//    match time is used up.
-//  Report: runs, returns, aborts (with reasons), crashes into walls, minimum
-//  wall clearance, the map stored in NVS checked against the real maze, and
-//  the MMRC score.
-//
-//  Usage: robot_sim <maze.txt> [--mirror] [--seed N] [--quiet] [--model-error F] [--harsh]
-//                   [--no-enc] [--enc-fail T_S]
-//                   [--trace FROM_S TO_S]
-// =============================================================================
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,10 +20,9 @@ namespace {
 TrueMaze g_truth;
 bool     g_mirror = false;
 
-// --- operator action queue ---
 struct Act {
   uint64_t at;
-  int      kind;   // 0 button, 1 hand, 2 teleport
+  int      kind;
   bool     on;
 };
 std::vector<Act> g_acts;
@@ -55,7 +36,6 @@ void handWave(uint64_t at) {
   act(at + 800000u, 1, false);
 }
 
-// --- what the firmware reported ---
 int runsOk = 0, returnsOk = 0, aborts = 0;
 double bestS = 1e9;
 std::vector<std::string> abortReasons;
@@ -92,8 +72,8 @@ void onLine(const char* line) {
   } else if (strstr(line, "ABORT:")) {
     ++aborts;
     abortReasons.push_back(line);
-    act(now + 2000000u, 2, true);    // operator lifts the robot to the start
-    press(now + 2500000u, 100);      // rescue
+    act(now + 2000000u, 2, true);
+    press(now + 2500000u, 100);
     handWave(now + 4000000u);
   } else if (strstr(line, "match time used up")) {
     finished = true;
@@ -176,7 +156,7 @@ void onTick(uint64_t now) {
   if (now > g_limitUs) finish(2, "simulation time limit");
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
   if (argc < 2) {
@@ -190,7 +170,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--quiet")) quiet = true;
     else if (!strcmp(argv[i], "--no-enc")) p.encoders = false;
     else if (!strcmp(argv[i], "--enc-fail") && i + 1 < argc) p.encoderFailAtS = static_cast<float>(atof(argv[++i]));
-    else if (!strcmp(argv[i], "--harsh")) {   // worse hardware than expected
+    else if (!strcmp(argv[i], "--harsh")) {
       p.sonarNoiseMm = 4.0f;
       p.gyroBiasDps = 2.0f;
       p.gyroNoiseDps = 0.2f;

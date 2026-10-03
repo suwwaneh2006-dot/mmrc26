@@ -1,9 +1,4 @@
 @echo off
-rem ===========================================================================
-rem  Builds robot_sim.exe: the COMPLETE firmware (..\..\main, unchanged) plus
-rem  the MPU6050_light library, on a simulated robot (hal.cpp / world.h).
-rem  Usage afterwards:  robot_sim.exe ..\mazes\mmrc26-island-10x10.txt [--mirror] [--seed N] [--quiet]
-rem ===========================================================================
 setlocal
 cd /d "%~dp0"
 set GXX=g++

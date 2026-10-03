@@ -1,6 +1,3 @@
-// =============================================================================
-//  sonar.cpp - see sonar.h
-// =============================================================================
 #include "sonar.h"
 
 #include <soc/gpio_struct.h>
@@ -9,12 +6,10 @@ namespace {
 
 using sonar::Id;
 
-// Echo state, advanced by the ISR (ARMED -> HIGH -> DONE) and reset by the
-// main loop (-> ARMED) only while ECHO is low, so the two never race.
 enum IsrState : uint8_t { ISR_IDLE = 0, ISR_ARMED, ISR_HIGH, ISR_DONE };
 
 struct Channel {
-  // Configuration
+
   uint8_t  trigPin;
   uint8_t  echoPin;
   float    maxMm;
@@ -22,12 +17,10 @@ struct Channel {
   float    wallOnMm;
   float    wallOffMm;
 
-  // Shared with the ISR
   volatile uint8_t  isrState;
   volatile uint32_t riseUs;
   volatile uint32_t fallUs;
 
-  // Main-loop state
   uint32_t trigUs;
   bool     highSeen;
   uint32_t highSinceUs;
@@ -46,25 +39,20 @@ struct Channel {
 
 Channel g_ch[sonar::COUNT];
 
-// F, L, F, R: front gets every second slot.
 constexpr Id ORDER[] = {sonar::FRONT, sonar::LEFT, sonar::FRONT, sonar::RIGHT};
 constexpr uint8_t ORDER_LEN = sizeof(ORDER) / sizeof(ORDER[0]);
 
-bool     g_frontOnly = false;  // calibration: ping only the front sensor
+bool     g_frontOnly = false;
 uint8_t  g_orderIdx  = 0;
-int8_t   g_active    = -1;     // sensor currently in flight, -1 = none
-uint32_t g_lastEndUs = 0;      // end of the previous measurement
-float    g_speedHint = 0.0f;   // mm/s, from the motion controller
-float    g_rateHint  = 0.0f;   // deg/s
+int8_t   g_active    = -1;
+uint32_t g_lastEndUs = 0;
+float    g_speedHint = 0.0f;
+float    g_rateHint  = 0.0f;
 
-// ECHO edge interrupt. Reads the pin level instead of trusting the edge
-// direction: this makes it immune to the ESP32 GPIO36/39 errata (an ~80 ns
-// low glitch when ADC1 powers up), because by the time the ISR runs the pin
-// is back to its true level and a spurious "fall" is ignored.
 void IRAM_ATTR echoIsr(void* arg) {
   Channel* c = static_cast<Channel*>(arg);
   const uint32_t now = micros();
-  const bool high = ((GPIO.in1.val >> (c->echoPin - 32)) & 1u) != 0;   // GPIO 32-39 input register
+  const bool high = ((GPIO.in1.val >> (c->echoPin - 32)) & 1u) != 0;
   if (high) {
     if (c->isrState == ISR_ARMED) {
       c->riseUs = now;
@@ -108,7 +96,6 @@ float median3(const float* h, uint8_t n, uint8_t newest) {
   return fmaxf(fminf(a, b), fminf(fmaxf(a, b), c));
 }
 
-// A complete raw measurement: gate, median, wall flag. raw > maxMm = NO_WALL.
 void publish(Channel& c, float raw, uint32_t tUs) {
   c.out.rawMm = raw;
   c.out.tUs = tUs;
@@ -120,8 +107,7 @@ void publish(Channel& c, float raw, uint32_t tUs) {
     const float dt = (tUs - c.lastAcceptedUs) * 1e-6f;
     const float allowed = fabsf(g_speedHint) * dt + SONAR_GATE_MARGIN_MM;
     if (fabsf(raw - c.lastAcceptedMm) > allowed) {
-      // Consecutive rejected readings that agree with each other mean the
-      // world really changed: after SONAR_GATE_RELOCK_COUNT of them, accept.
+
       const bool consistent = c.rejectRun > 0 && fabsf(raw - c.lastRejectedMm) <= allowed;
       c.rejectRun = consistent ? c.rejectRun + 1 : 1;
       c.lastRejectedMm = raw;
@@ -133,7 +119,7 @@ void publish(Channel& c, float raw, uint32_t tUs) {
   }
   c.rejectRun = 0;
   if (far) {
-    c.haveAccepted = false;   // the next wall seen may legitimately be anywhere
+    c.haveAccepted = false;
   } else {
     c.haveAccepted = true;
     c.lastAcceptedMm = raw;
@@ -161,12 +147,11 @@ void finishActive(uint32_t nowUs) {
   g_lastEndUs = nowUs;
 }
 
-// Check the measurement in flight.
 void serviceActive(uint32_t now) {
   Channel& c = g_ch[g_active];
   switch (c.isrState) {
     case ISR_ARMED:
-      if (now - c.trigUs > SONAR_RISE_TIMEOUT_US) {   // sensor never answered
+      if (now - c.trigUs > SONAR_RISE_TIMEOUT_US) {
         c.isrState = ISR_IDLE;
         c.st.misses++;
         if (c.st.missRun < 255) c.st.missRun++;
@@ -174,8 +159,7 @@ void serviceActive(uint32_t now) {
       }
       break;
     case ISR_HIGH:
-      // Still high beyond the maximum range: NO_WALL now, without waiting for
-      // the (up to 200 ms) timeout fall. The sensor stays BUSY until it falls.
+
       if (now - c.riseUs > c.maxEchoUs) {
         c.st.echoes++;
         c.st.missRun = 0;
@@ -203,19 +187,18 @@ void serviceActive(uint32_t now) {
 void trigger(Channel& c) {
   c.isrState = ISR_ARMED;
   digitalWrite(c.trigPin, HIGH);
-  delayMicroseconds(SONAR_TRIG_PULSE_US);   // the only busy-wait: 10 us
+  delayMicroseconds(SONAR_TRIG_PULSE_US);
   digitalWrite(c.trigPin, LOW);
   c.trigUs = micros();
   c.st.pings++;
 }
 
-// Fire the next sensor in F, L, F, R order, skipping BUSY ones.
 void fireNext() {
   for (uint8_t tries = 0; tries < ORDER_LEN; ++tries) {
     const Id id = g_frontOnly ? sonar::FRONT : ORDER[g_orderIdx];
     g_orderIdx = (g_orderIdx + 1) % ORDER_LEN;
     Channel& c = g_ch[id];
-    if (echoHigh(c)) continue;   // still holding ECHO from an earlier ping
+    if (echoHigh(c)) continue;
     trigger(c);
     g_active = static_cast<int8_t>(id);
     return;
@@ -237,7 +220,7 @@ void monitorStuck(Channel& c, uint32_t now) {
   c.st.faulty = c.st.stuck || c.st.missRun >= SONAR_MISS_FAULT_COUNT;
 }
 
-}  // namespace
+}
 
 namespace sonar {
 
@@ -251,7 +234,7 @@ void begin() {
   for (Channel& c : g_ch) {
     pinMode(c.trigPin, OUTPUT);
     digitalWrite(c.trigPin, LOW);
-    pinMode(c.echoPin, INPUT);   // GPIO 34-39 have no pulls; the divider pulls down
+    pinMode(c.echoPin, INPUT);
     attachInterruptArg(c.echoPin, echoIsr, &c, CHANGE);
   }
   g_active = -1;
@@ -285,8 +268,7 @@ void setFrontOnly(bool frontOnly) { g_frontOnly = frontOnly; }
 
 void discardInFlight() {
   if (g_active < 0) return;
-  // The ISR may have been delayed (flash write): this echo's timing is not
-  // trustworthy. Drop it; the sensor stays BUSY until its ECHO falls.
+
   g_ch[g_active].isrState = ISR_IDLE;
   finishActive(micros());
 }
@@ -312,4 +294,4 @@ const char* name(Id id) {
   }
 }
 
-}  // namespace sonar
+}

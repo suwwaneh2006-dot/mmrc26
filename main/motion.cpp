@@ -1,6 +1,3 @@
-// =============================================================================
-//  motion.cpp - see motion.h
-// =============================================================================
 #include "motion.h"
 
 #include "encoders.h"
@@ -15,11 +12,10 @@ namespace {
 using motion::Result;
 
 constexpr float DEG2RAD = 0.01745329f;
-constexpr float PIVOT_MIN_RATE_DPS = 15.0f;   // pivot profile crawl rate (always finishes)
+constexpr float PIVOT_MIN_RATE_DPS = 15.0f;
 
 enum class Mode : uint8_t { IDLE, RAW, CONSTANT, RUN, PIVOT, ALIGN, STOPPING };
 
-// Trapezoidal profile on |angle| for pivots.
 struct AngleProfile {
   float total = 0.0f, vmax = 0.0f, accel = 0.0f;
   float pos = 0.0f, vel = 0.0f, acc = 0.0f;
@@ -53,33 +49,29 @@ struct AngleProfile {
 
 Mode     g_mode = Mode::IDLE;
 Result   g_result = Result::DONE;
-Result   g_pendingResult = Result::DONE;   // reported once STOPPING finishes
+Result   g_pendingResult = Result::DONE;
 SpeedTier g_tier = TIERS[0];
 float    g_speedCap = 0.0f;
 
-// Run state
 float    g_runTarget = 0.0f;
-float    g_runSign = 1.0f;          // +1 forward run, -1 reverse (re-centring)
+float    g_runSign = 1.0f;
 float    g_vRef = 0.0f;
 float    g_aRef = 0.0f;
 
-// Pivot state
 AngleProfile g_turn;
 float    g_turnSign = 1.0f;
 float    g_pivotStart = 0.0f;
 
-// Open-loop state
 float    g_constV = 0.0f;
 bool     g_holdHeading = false;
 float    g_rawL = 0.0f, g_rawR = 0.0f;
 
-float    g_headingTarget = 0.0f;   // cardinal heading being held
+float    g_headingTarget = 0.0f;
 uint32_t g_startMs = 0;
 uint32_t g_timeoutMs = 0;
 uint32_t g_settleSinceMs = 0;
 bool     g_settling = false;
 
-// Stuck detection
 uint32_t g_lastMotionMs = 0;
 uint32_t g_lastWheelMotionMs = 0;
 float    g_stuckRefRange = -1.0f;
@@ -108,12 +100,10 @@ void startCommon(Mode mode, uint32_t timeoutMs) {
 
 bool timedOut() { return millis() - g_startMs > g_timeoutMs; }
 
-// Integral of the heading error on the current straight (wheel mismatch).
 float g_headingI = 0.0f;
-// Integral of the forward speed error (encoder speed loop).
+
 float g_speedI = 0.0f;
 
-// Feedback volts for a wheel / forward speed error, encoders only.
 float speedFeedback(float target, float measured, float* integral, float dt, bool usable) {
   if (!usable) return 0.0f;
   const float err = target - measured;
@@ -125,9 +115,6 @@ float speedFeedback(float target, float measured, float* integral, float dt, boo
   return clampf(SPEED_KP_V_PER_MM_S * err + i, -SPEED_FB_MAX_V, SPEED_FB_MAX_V);
 }
 
-// Differential voltage holding thetaCmd (CCW positive). PD, plus a clamped
-// integral (only while driving a run) that removes the steady error a
-// left/right motor mismatch would otherwise leave.
 float headingCorrection(float thetaCmd, float dt = 0.0f) {
   const float err = thetaCmd - imu::headingDeg();
   if (dt > 0.0f) {
@@ -137,7 +124,6 @@ float headingCorrection(float thetaCmd, float dt = 0.0f) {
   return clampf(c, -HEADING_MAX_CORR_V, HEADING_MAX_CORR_V);
 }
 
-// Heading command for a straight: cardinal + wall-centring offset.
 float centringHeading(float speed) {
   static float lastLat = 0.0f;
   static uint32_t lastUs = 0;
@@ -148,12 +134,11 @@ float centringHeading(float speed) {
   const float rate = (dt > 0.0f && dt < 0.2f) ? (lat - lastLat) / dt : 0.0f;
   lastLat = lat;
   lastUs = now;
-  // Robot left of centre (lat > 0) -> steer right (negative heading offset).
+
   const float offset = -(CENTER_KP_DEG_PER_MM * lat + CENTER_KD_DEG_S_PER_MM * rate);
   return g_headingTarget + clampf(offset, -CENTER_MAX_DEG, CENTER_MAX_DEG);
 }
 
-// Brake if the gap in front of the nose is below stopping distance + margin.
 bool collisionImminent(float speed_mm_s) {
   if (speed_mm_s <= 0.0f) return false;
   const sonar::Reading f = sonar::read(sonar::FRONT);
@@ -164,8 +149,6 @@ bool collisionImminent(float speed_mm_s) {
   return gapMm < stopMm;
 }
 
-// Spec: commanded motion but no front-range change and no gyro motion for
-// STUCK_MS -> stop. Only judged while the command is well above dead-band.
 bool stuck(bool useFrontRange) {
   const uint32_t now = millis();
   const float cmd = fmaxf(fabsf(motors::appliedLeftV()), fabsf(motors::appliedRightV()));
@@ -174,7 +157,7 @@ bool stuck(bool useFrontRange) {
     g_lastWheelMotionMs = now;
     return false;
   }
-  // Wheels blocked: the encoders see no rotation although clearly driven.
+
   if (encoders::healthy() && fabsf(encoders::leftSpeed()) < STUCK_MIN_WHEEL_MM_S &&
       fabsf(encoders::rightSpeed()) < STUCK_MIN_WHEEL_MM_S && now - g_lastWheelMotionMs > STUCK_MS) {
     return true;
@@ -182,13 +165,12 @@ bool stuck(bool useFrontRange) {
   if (fabsf(encoders::leftSpeed()) >= STUCK_MIN_WHEEL_MM_S || fabsf(encoders::rightSpeed()) >= STUCK_MIN_WHEEL_MM_S) {
     g_lastWheelMotionMs = now;
   }
-  // Spec: no front-range change and no gyro motion (also catches wheels
-  // spinning in place, which the encoders cannot see).
+
   bool moving = fabsf(imu::rateDps()) > STUCK_MAX_RATE_DPS;
   if (useFrontRange) {
     const sonar::Reading f = sonar::read(sonar::FRONT);
     if (!f.inRange) {
-      moving = true;   // no wall in range: cannot judge, assume moving
+      moving = true;
     } else if (g_stuckRefRange < 0.0f || fabsf(f.mm - g_stuckRefRange) > STUCK_MIN_RANGE_CHANGE_MM) {
       g_stuckRefRange = f.mm;
       moving = true;
@@ -219,12 +201,11 @@ void tickRun(float dt) {
   g_aRef = (vNew - g_vRef) / dt;
   g_vRef = vNew;
 
-  // Feed-forward through the model, plus closed-loop speed from the encoders.
   const float vCmd = fmaxf(g_vRef + m.tau_s * g_aRef, 0.0f) / estimator::modelScale();
   const bool encUsable = encoders::healthy() && (encoders::leftUsable() || encoders::rightUsable());
   const float fb = speedFeedback(g_vRef, g_runSign * estimator::v(), &g_speedI, dt, encUsable);
   const float base = g_vRef > 0.0f ? g_runSign * (m.voltsFor(vCmd) + fb) : 0.0f;
-  // Centring steers through the heading, which only works driving forward.
+
   const float theta = forward ? centringHeading(fmaxf(g_vRef, estimator::v())) : g_headingTarget;
   const float corr = headingCorrection(theta, g_vRef > 0.0f ? dt : 0.0f);
   motors::setVolts(base - corr, base + corr);
@@ -252,16 +233,14 @@ void tickPivot(float dt) {
   const float err     = refDeg - imu::headingDeg();
   const float rate    = imu::rateDps();
 
-  // Wheel speed (mm/s): feed-forward + PD on angle and rate.
   float u = g_turnSign * (g_turn.vel + m.tau_s * g_turn.acc) * DEG2RAD * halfTrack +
             PIVOT_KP_MM_S_PER_DEG * err + PIVOT_KD_MM_S_PER_DPS * (refRate - rate);
 
   const float finalErr = g_headingTarget - imu::headingDeg();
   const bool inBand = fabsf(finalErr) < TURN_SETTLE_DEG && fabsf(rate) < TURN_SETTLE_RATE_DPS;
-  // Inside half the settle band output nothing, so the dead-band feed-forward
-  // cannot limit-cycle around the target.
+
   if (g_turn.done && fabsf(finalErr) < 0.5f * TURN_SETTLE_DEG && fabsf(rate) < TURN_SETTLE_RATE_DPS) u = 0.0f;
-  // Each wheel follows +-u; encoder feedback keeps both wheels at that speed.
+
   float vr = m.voltsFor(u);
   float vl = -vr;
   if (PIVOT_WHEEL_FEEDBACK && fabsf(u) > 1.0f) {
@@ -289,10 +268,10 @@ void tickPivot(float dt) {
 void tickAlign() {
   const sonar::Reading f = sonar::read(sonar::FRONT);
   if (!f.inRange || sonar::ageMs(sonar::FRONT) > SONAR_FRESH_MS) {
-    enterStopping(Result::DONE);   // nothing to align to
+    enterStopping(Result::DONE);
     return;
   }
-  const float err = f.mm - FRONT_CENTRE_READING_MM;   // + = too far from the wall
+  const float err = f.mm - FRONT_CENTRE_READING_MM;
   const float v = clampf(ALIGN_KP_PER_S * err, -ALIGN_MAX_SPEED_MM_S, ALIGN_MAX_SPEED_MM_S);
   const float base = fabsf(err) < ALIGN_TOLERANCE_MM ? 0.0f : motors::model().voltsFor(v);
   const float corr = headingCorrection(g_headingTarget, fabsf(base) > 0.0f ? CONTROL_TICK_S : 0.0f);
@@ -310,7 +289,7 @@ void tickAlign() {
     g_settling = false;
   }
   if (stuck(true)) enterStopping(Result::ABORT_STUCK);
-  else if (timedOut()) enterStopping(Result::DONE);   // best effort: alignment is optional
+  else if (timedOut()) enterStopping(Result::DONE);
 }
 
 void tickStopping() {
@@ -329,7 +308,6 @@ void tickStopping() {
   }
 }
 
-// The control law, run by the scheduler every tick.
 void tick(float dt) {
   estimator::tick(dt);
 
@@ -361,7 +339,7 @@ void tick(float dt) {
   }
 }
 
-}  // namespace
+}
 
 namespace motion {
 
@@ -385,7 +363,7 @@ void runBegin(const SpeedTier& tier, float sStartMm, float sigmaMm) {
 
 void runExtend(float mm) {
   g_runTarget += g_runSign * mm;
-  // Generous timeout: the whole remaining run at the slowest crawl + 2 s.
+
   const float remaining = fabsf(g_runTarget - estimator::s());
   const uint32_t expectedMs = static_cast<uint32_t>(
       1000.0f * (remaining / fminf(g_tier.speed_mm_s, CONF_LOW_SPEED_MM_S) + g_tier.speed_mm_s / g_tier.accel_mm_s2));
@@ -402,7 +380,7 @@ void straight(float dist_mm, const SpeedTier& tier) {
 
 void reverse(float dist_mm, const SpeedTier& tier) {
   runBegin(tier, 0.0f, ALIGNED_SIGMA_MM);
-  // Driven at an angle to the grid: sonar fixes would be wrong.
+
   estimator::beginStraight(0.0f, ALIGNED_SIGMA_MM, g_headingTarget, false);
   g_runSign = -1.0f;
   runExtend(fmaxf(dist_mm, 0.0f));
@@ -414,7 +392,7 @@ void pivot(float angle_deg, const SpeedTier& tier) {
   estimator::endStraight();
   g_turnSign = angle_deg >= 0.0f ? 1.0f : -1.0f;
   g_pivotStart = g_headingTarget;
-  g_headingTarget += angle_deg;   // targets accumulate: no drift from settle errors
+  g_headingTarget += angle_deg;
   g_turn.start(fabsf(angle_deg), tier.turnRate_dps, TURN_ACCEL_DPS2);
   const uint32_t expectedMs = static_cast<uint32_t>(g_turn.duration() * 1000.0f);
   startCommon(Mode::PIVOT, expectedMs + TURN_TIMEOUT_MS);
@@ -439,7 +417,7 @@ void rawVolts(float left_v, float right_v) {
 
 void stop() {
   if (g_mode == Mode::IDLE || g_mode == Mode::STOPPING) return;
-  // A deliberate stop of an open-ended mode (raw / constant) is a normal end.
+
   const bool openEnded = g_mode == Mode::RAW || g_mode == Mode::CONSTANT;
   enterStopping(openEnded ? Result::DONE : Result::ABORT_USER);
 }
@@ -478,4 +456,4 @@ Telemetry telemetry() {
 float headingTargetDeg() { return g_headingTarget; }
 void  setHeadingTargetDeg(float deg) { g_headingTarget = deg; }
 
-}  // namespace motion
+}

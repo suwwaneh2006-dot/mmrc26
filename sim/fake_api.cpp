@@ -1,19 +1,13 @@
-// =============================================================================
-//  sim/fake_api.cpp - see fake_api.h. Implements API.h against a TrueMaze.
-// =============================================================================
 #include "fake_api.h"
 
 #include "API.h"
 
-// ---------------------------------------------------------------------------
-//  Fake mms
-// ---------------------------------------------------------------------------
 namespace {
 TrueMaze g_world;
 int g_x = 0, g_y = 0;
 mm::Dir g_dir = mm::NORTH;
 long g_moves = 0, g_turns = 0;
-}  // namespace
+}
 
 namespace fake {
 void setWorld(const TrueMaze& maze, int startX) {
@@ -25,7 +19,7 @@ void setWorld(const TrueMaze& maze, int startX) {
 }
 long moves() { return g_moves; }
 long turns() { return g_turns; }
-}  // namespace fake
+}
 
 int API::mazeWidth() { return g_world.width; }
 int API::mazeHeight() { return g_world.height; }

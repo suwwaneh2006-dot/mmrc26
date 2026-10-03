@@ -1,6 +1,3 @@
-// =============================================================================
-//  battery.cpp - see battery.h
-// =============================================================================
 #include "battery.h"
 
 namespace {
@@ -14,12 +11,12 @@ float sampleVolts() {
   return analogReadMilliVolts(PIN_BATT_SENSE) * 0.001f * BATT_DIVIDER_RATIO * BATT_CAL_FACTOR;
 }
 
-}  // namespace
+}
 
 namespace battery {
 
 void begin() {
-  analogSetPinAttenuation(PIN_BATT_SENSE, ADC_11db);   // 0-3.1 V input range
+  analogSetPinAttenuation(PIN_BATT_SENSE, ADC_11db);
   g_sum = 0.0f;
   for (float& s : g_samples) {
     s = sampleVolts();
@@ -37,7 +34,7 @@ void update() {
   g_sum += v - g_samples[g_next];
   g_samples[g_next] = v;
   g_next = (g_next + 1) % BATT_SAMPLES;
-  if (g_next == 0) {   // re-sum once per window so rounding error cannot creep
+  if (g_next == 0) {
     g_sum = 0.0f;
     for (float s : g_samples) g_sum += s;
   }
@@ -45,4 +42,4 @@ void update() {
 
 float volts() { return g_sum / BATT_SAMPLES; }
 
-}  // namespace battery
+}

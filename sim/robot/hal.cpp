@@ -1,13 +1,3 @@
-// =============================================================================
-//  sim/robot/hal.cpp - implementation of the Arduino shim on top of a
-//  simulated robot in a simulated maze. See world.h.
-//
-//  Time: a virtual microsecond clock. Every micros()/millis() call costs
-//  CALL_COST_US of simulated time, so the firmware's busy loops advance the
-//  world exactly as on the real CPU. Pending world events (echo edges, the
-//  esp_timer watchdog, physics steps) are processed in time order; an echo
-//  edge calls the firmware's real ISR at its exact simulated time.
-// =============================================================================
 #include <algorithm>
 #include <cstdarg>
 #include <map>
@@ -30,22 +20,19 @@ TwoWire Wire;
 
 namespace {
 
-constexpr uint32_t CALL_COST_US = 2;      // simulated cost of one clock read
-constexpr uint32_t PHYS_DT_US   = 500;    // physics step
+constexpr uint32_t CALL_COST_US = 2;
+constexpr uint32_t PHYS_DT_US   = 500;
 constexpr float    PI_F = 3.14159265f;
 constexpr float    DEG = PI_F / 180.0f;
-constexpr float    WALL = 12.0f;          // wall / post thickness (rules)
+constexpr float    WALL = 12.0f;
 constexpr float    HALF_WALL = 6.0f;
-// Robot footprint (simulated body) around the axle centre.
+
 constexpr float    BODY_FRONT = ROBOT_NOSE_X_MM;
 constexpr float    BODY_BACK = 45.0f;
 constexpr float    BODY_HALF_W = 42.0f;
-constexpr float    SOUND_MM_PER_US = 0.3434f;   // round trip uses 2 d / c
+constexpr float    SOUND_MM_PER_US = 0.3434f;
 constexpr uint32_t ECHO_RISE_DELAY_US = 450;
 
-// ---------------------------------------------------------------------------
-//  Clock, pins, interrupts
-// ---------------------------------------------------------------------------
 uint64_t g_now = 0;
 bool     g_inAdvance = false;
 uint8_t  g_level[40];
@@ -69,17 +56,14 @@ float gauss(float sigma) {
   return n(g_rng);
 }
 
-// ---------------------------------------------------------------------------
-//  Maze geometry
-// ---------------------------------------------------------------------------
 struct Rect {
   float x0, x1, y0, y1;
 };
-TrueMaze g_maze;                  // physical maze (mirrored if requested)
+TrueMaze g_maze;
 world::Params g_p;
-std::vector<float> g_lx, g_ly;    // wall centre lines
-std::vector<Rect>  g_rects;       // every wall segment and post
-std::vector<std::vector<int>> g_bucket;   // rect indices per cell (with neighbours)
+std::vector<float> g_lx, g_ly;
+std::vector<Rect>  g_rects;
+std::vector<std::vector<int>> g_bucket;
 int g_startX = 0;
 
 void addRect(float x0, float x1, float y0, float y1) { g_rects.push_back(Rect{x0, x1, y0, y1}); }
@@ -94,7 +78,7 @@ void buildGeometry() {
   g_rects.clear();
   for (int i = 0; i <= g_maze.width; ++i) {
     for (int j = 0; j <= g_maze.height; ++j) {
-      addRect(g_lx[i] - HALF_WALL, g_lx[i] + HALF_WALL, g_ly[j] - HALF_WALL, g_ly[j] + HALF_WALL);   // post
+      addRect(g_lx[i] - HALF_WALL, g_lx[i] + HALF_WALL, g_ly[j] - HALF_WALL, g_ly[j] + HALF_WALL);
     }
   }
   for (int x = 0; x < g_maze.width; ++x) {
@@ -109,7 +93,7 @@ void buildGeometry() {
         addRect(g_lx[x] + HALF_WALL, g_lx[x + 1] - HALF_WALL, g_ly[y + 1] - HALF_WALL, g_ly[y + 1] + HALF_WALL);
     }
   }
-  // Buckets: rects overlapping each cell grown by one wall thickness.
+
   g_bucket.assign(static_cast<size_t>(g_maze.width * g_maze.height), std::vector<int>());
   for (int x = 0; x < g_maze.width; ++x) {
     for (int y = 0; y < g_maze.height; ++y) {
@@ -131,12 +115,9 @@ int cellIndexAt(float x, float y) {
   return cx * g_maze.height + cy;
 }
 
-// ---------------------------------------------------------------------------
-//  Robot physics
-// ---------------------------------------------------------------------------
 struct Robot {
-  float x, y, th;          // mm, mm, rad (CCW from +x)
-  float vl, vr;            // wheel speeds mm/s
+  float x, y, th;
+  float vl, vr;
   float omegaDps;
   bool  crashedNow;
 };
@@ -162,21 +143,20 @@ void startPose() {
   g_r.crashedNow = false;
 }
 
-// Applied motor voltage and bridge state from the real pin / PWM levels.
 float wheelTarget(uint8_t pwm, uint8_t in1, uint8_t in2, float gain, float& tau) {
   const bool stby = g_level[PIN_MOTOR_STBY] != 0;
   const bool a = g_level[in1] != 0, b = g_level[in2] != 0;
   if (!stby || (!a && !b)) {
-    tau = 0.15f;   // coasting
+    tau = 0.15f;
     return 0.0f;
   }
   if (a && b) {
-    tau = 0.015f;  // short brake
+    tau = 0.015f;
     return 0.0f;
   }
   const float v = batteryVolts() * (g_duty[pwm] / static_cast<float>(MOTOR_PWM_MAX)) * (a ? 1.0f : -1.0f);
   if (fabsf(v) < g_p.motorDeadbandV) {
-    tau = 0.03f;   // static friction holds the wheel
+    tau = 0.03f;
     return 0.0f;
   }
   tau = g_p.motorTauS;
@@ -214,11 +194,9 @@ void checkCollision() {
     Serial.printf("SIM CRASH at x=%.0f y=%.0f heading=%.1f deg\n", g_r.x, g_r.y, g_r.th / DEG);
   }
   g_r.crashedNow = hit;
-  if (hit) g_r.vl = g_r.vr = 0.0f;   // a wall stops the robot
+  if (hit) g_r.vl = g_r.vr = 0.0f;
 }
 
-// Every time the robot comes to rest after driving: how far from the true
-// cell centre is it (along its heading / sideways), and how crooked?
 void recordStop(float v) {
   const float speed = fabsf(v) + fabsf(g_r.vr - g_r.vl);
   if (speed > 50.0f) g_wasMoving = true;
@@ -241,8 +219,6 @@ void recordStop(float v) {
   g_stats.maxAbsHeadingDeg = fmaxf(g_stats.maxAbsHeadingDeg, fabsf(headErr));
 }
 
-// Hall encoder channel A per wheel: an edge every (true) mm-per-edge of wheel
-// travel, delivered to the firmware's real ISR on GPIO 5 / 22.
 float g_encAcc[2] = {0.0f, 0.0f};
 void encoderEdges(int i, uint8_t pin, float travelMm) {
   const float mmPerEdge = ENC_MM_PER_EDGE * g_p.wheelDiameterFactor;
@@ -268,7 +244,7 @@ void physicsStep(float dt) {
   g_r.vl += (tl - g_r.vl) * fminf(dt / tauL, 1.0f);
   g_r.vr += (tr - g_r.vr) * fminf(dt / tauR, 1.0f);
   const float v = 0.5f * (g_r.vl + g_r.vr);
-  const float w = (g_r.vr - g_r.vl) / WHEEL_TRACK_MM;   // rad/s
+  const float w = (g_r.vr - g_r.vl) / WHEEL_TRACK_MM;
   g_r.omegaDps = w / DEG;
   g_r.th += w * dt;
   g_r.x += v * cosf(g_r.th) * dt;
@@ -280,9 +256,6 @@ void physicsStep(float dt) {
   recordStop(v);
 }
 
-// ---------------------------------------------------------------------------
-//  Sonars
-// ---------------------------------------------------------------------------
 struct Sonar {
   uint8_t trig, echo;
   float x, y, angleDeg;
@@ -293,7 +266,6 @@ struct Sonar {
 };
 Sonar g_sonar[3];
 
-// Nearest echo along a ray; false if nothing reflects back (specular loss).
 bool castRay(float ox, float oy, float ang, float& dist) {
   const float dx = cosf(ang), dy = sinf(ang);
   float best = 1e9f;
@@ -319,7 +291,7 @@ bool castRay(float ox, float oy, float ang, float& dist) {
     }
     if (tmax < tmin || tmin <= 0.0f || tmin >= best) continue;
     best = tmin;
-    // Incidence angle against the face normal: oblique faces scatter away.
+
     const float cosInc = axis == 0 ? fabsf(dx) : fabsf(dy);
     bestEcho = cosInc > cosf(40.0f * DEG);
   }
@@ -338,7 +310,7 @@ bool measure(const Sonar& s, float& d) {
   const float base = g_r.th + s.angleDeg * DEG;
   bool any = false;
   float best = 1e9f;
-  for (float off : {-10.0f, -5.0f, 0.0f, 5.0f, 10.0f}) {   // ~ the HC-SR04 beam
+  for (float off : {-10.0f, -5.0f, 0.0f, 5.0f, 10.0f}) {
     float dd;
     if (castRay(ox, oy, base + off * DEG, dd) && dd < best) {
       best = dd;
@@ -359,7 +331,7 @@ void setEchoLevel(Sonar& s, bool high) {
 }
 
 void triggerSonar(Sonar& s) {
-  if (s.pending || g_level[s.echo]) return;   // busy: HC-SR04 ignores the trigger
+  if (s.pending || g_level[s.echo]) return;
   float d;
   const bool echo = measure(s, d);
   s.pending = true;
@@ -368,9 +340,6 @@ void triggerSonar(Sonar& s) {
                               : static_cast<uint64_t>(g_p.sonarNoEchoMs * 1000.0f));
 }
 
-// ---------------------------------------------------------------------------
-//  MPU6050 on the emulated I2C bus
-// ---------------------------------------------------------------------------
 uint8_t  g_i2cAddr = 0;
 uint8_t  g_i2cTx[8];
 int      g_i2cTxLen = 0;
@@ -399,11 +368,8 @@ uint8_t mpuRegister(uint8_t reg) {
 
 void advanceTo(uint64_t target);
 
-}  // namespace
+}
 
-// ---------------------------------------------------------------------------
-//  Event loop
-// ---------------------------------------------------------------------------
 namespace {
 uint64_t g_nextPhys = PHYS_DT_US;
 uint64_t g_nextTick = 1000;
@@ -416,7 +382,7 @@ void advanceTo(uint64_t target) {
   g_inAdvance = true;
   while (true) {
     uint64_t next = g_nextPhys;
-    int kind = 0;   // 0 physics, 1 rise, 2 fall, 3 timer, 4 scenario tick
+    int kind = 0;
     int which = -1;
     if (g_nextTick < next) { next = g_nextTick; kind = 4; }
     for (int i = 0; i < 3; ++i) {
@@ -443,13 +409,10 @@ void advanceTo(uint64_t target) {
   g_inAdvance = false;
 }
 
-std::map<std::string, std::string> g_nvs;   // "ns/key" -> bytes
+std::map<std::string, std::string> g_nvs;
 std::string g_line;
-}  // namespace
+}
 
-// ---------------------------------------------------------------------------
-//  Arduino API
-// ---------------------------------------------------------------------------
 uint32_t micros() {
   if (!g_inAdvance) advanceTo(g_now + CALL_COST_US);
   return static_cast<uint32_t>(g_now);
@@ -515,7 +478,6 @@ int SimSerial::printf(const char* fmt, ...) {
   return n;
 }
 
-// --- Wire (MPU6050 at 0x68) ---
 bool TwoWire::begin(int, int, uint32_t) { return true; }
 void TwoWire::setTimeOut(uint16_t) {}
 void TwoWire::beginTransmission(uint8_t address) {
@@ -527,8 +489,8 @@ size_t TwoWire::write(uint8_t data) {
   return 1;
 }
 uint8_t TwoWire::endTransmission(bool) {
-  delayMicroseconds(60);   // bus time
-  if (g_i2cAddr != 0x68) return 2;   // NACK
+  delayMicroseconds(60);
+  if (g_i2cAddr != 0x68) return 2;
   if (g_i2cTxLen >= 1) g_regPtr = g_i2cTx[0];
   if (g_i2cTxLen >= 2 && g_regPtr == 0x1B) g_gyroConfig = g_i2cTx[1];
   return 0;
@@ -543,11 +505,10 @@ size_t TwoWire::requestFrom(uint8_t address, size_t len) {
 }
 int TwoWire::read() { return g_rxPos < g_rxLen ? g_rx[g_rxPos++] : -1; }
 
-// --- Preferences ---
 bool Preferences::begin(const char* name, bool readOnly) {
   strncpy(ns_, name, sizeof(ns_) - 1);
   readOnly_ = readOnly;
-  if (readOnly) {   // like NVS: a read-only open of a missing namespace fails
+  if (readOnly) {
     const std::string prefix = std::string(ns_) + "/";
     bool found = false;
     for (const auto& kv : g_nvs) found = found || kv.first.compare(0, prefix.size(), prefix) == 0;
@@ -565,7 +526,7 @@ size_t Preferences::getBytes(const char* key, void* buf, size_t maxLen) {
 }
 size_t Preferences::putBytes(const char* key, const void* value, size_t len) {
   if (!open_ || readOnly_) return 0;
-  delay(4);   // flash write time: exercises the blocking-section path
+  delay(4);
   g_nvs[std::string(ns_) + "/" + key] = std::string(static_cast<const char*>(value), len);
   return len;
 }
@@ -579,7 +540,6 @@ bool Preferences::clear() {
   return true;
 }
 
-// --- esp_timer ---
 esp_err_t esp_timer_create(const esp_timer_create_args_t* args, esp_timer_handle_t* out) {
   if (g_timerCount >= 4) return ESP_FAIL;
   g_timers[g_timerCount] = Timer{args->callback, args->arg, 0, 0, false};
@@ -596,9 +556,6 @@ esp_err_t esp_timer_start_periodic(esp_timer_handle_t timer, uint64_t period_us)
   return ESP_OK;
 }
 
-// ---------------------------------------------------------------------------
-//  World control
-// ---------------------------------------------------------------------------
 namespace world {
 
 void init(const TrueMaze& maze, const Params& p) {
@@ -642,4 +599,4 @@ bool nvsGet(const std::string& ns, const std::string& key, std::string& out) {
   return true;
 }
 
-}  // namespace world
+}

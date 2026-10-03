@@ -37,8 +37,8 @@
 
    Then recompile; `static_assert`s catch a robot too big to pivot or a duplicated GPIO.
 2. **Encoder supply voltage unknown.** If the encoders run on 5 V, each output needs a 10k/15k divider to 3.3 V before GPIO 5/22.
-3. **Comment removal requested by the user:** remove all comments and notes from every code copy. A string-aware stripper exists at the session scratchpad (`strip.cpp`) but has not been run. After stripping, recompile the ESP32 (both debug modes), `build_mms.bat` and `build_robot_sim.bat`, and rerun one simulated match to prove nothing changed.
-4. **Harsh crashes:** optionally investigate the 3 remaining crashes, with `robot_sim.exe <maze> --seed N --model-error F --harsh [--mirror] --trace FROM TO`.
+3. **Comments removed** from every code file and build script. The ESP32 binary is the same size as before, and all simulated tests still pass.
+4. **Harsh crashes (3 of 60), cause partly found:** under harsh gyro noise the firmware's heading picks up a jump of about 2° during some pivots, which builds up to about 5°. Wall centring and that heading error then cancel out, and the robot clips a wall at the next pivot. Not fixed. `PARALLEL_MAX_FIX_DEG` was raised to 10, which did not remove these crashes. Reproduce with `robot_sim.exe ..\mazes\generated\mmrc26-island-10x10-14.txt --seed 1098 --model-error 1.15 --harsh`.
 5. **`BRINGUP.md`:** update it for the encoders and beeped error codes, or delete it per the no-notes request.
 6. **Hardware bring-up order:** modes 1 → 2 (check that the encoders count in the right direction) → 5 → 3 → 4 → 6 → 7 on a small maze → full maze.
 7. **Match day:** set `MMRC_DEBUG 0`, wipe the map (hold the button at power-on), check the mirror setting, battery above 7.8 V, and ask the judges about `AUTO_RESTART`.

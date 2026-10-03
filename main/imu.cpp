@@ -1,6 +1,3 @@
-// =============================================================================
-//  imu.cpp - see imu.h
-// =============================================================================
 #include "imu.h"
 
 #include <MPU6050_light.h>
@@ -8,8 +5,8 @@
 
 namespace {
 
-constexpr uint8_t REG_CONFIG     = 0x1A;   // DLPF
-constexpr uint8_t REG_GYRO_ZOUT  = 0x47;   // GYRO_ZOUT_H, _L follows
+constexpr uint8_t REG_CONFIG     = 0x1A;
+constexpr uint8_t REG_GYRO_ZOUT  = 0x47;
 constexpr uint8_t REG_WHO_AM_I   = 0x75;
 
 MPU6050 g_mpu(Wire);
@@ -18,16 +15,14 @@ bool     g_ok        = false;
 uint8_t  g_whoAmI    = 0;
 uint8_t  g_failRun   = 0;
 uint32_t g_errors    = 0;
-float    g_bias      = 0.0f;   // deg/s, in sensor units after sign/scale
+float    g_bias      = 0.0f;
 float    g_rate      = 0.0f;
 float    g_heading   = 0.0f;
 
-// Stationary bias estimator: running mean over the current still window.
 float    g_stillSum   = 0.0f;
 uint32_t g_stillCount = 0;
 float    g_stillTime  = 0.0f;
 
-// Read the raw yaw rate in deg/s (sign and scale applied, bias not removed).
 bool readRawRate(float& out) {
   Wire.beginTransmission(MPU6050_ADDR);
   Wire.write(REG_GYRO_ZOUT);
@@ -46,7 +41,7 @@ void resetStill() {
   g_stillTime = 0.0f;
 }
 
-}  // namespace
+}
 
 namespace imu {
 
@@ -55,13 +50,12 @@ bool begin() {
   Wire.setTimeOut(I2C_TIMEOUT_MS);
 
   g_ok = false;
-  if (g_mpu.begin(IMU_GYRO_CONFIG, 0) != 0) return false;   // no ACK
+  if (g_mpu.begin(IMU_GYRO_CONFIG, 0) != 0) return false;
   g_whoAmI = g_mpu.readData(REG_WHO_AM_I);
-  if (g_whoAmI == 0x00 || g_whoAmI == 0xFF) return false;   // bus garbage
+  if (g_whoAmI == 0x00 || g_whoAmI == 0xFF) return false;
   if (g_mpu.writeData(REG_CONFIG, IMU_DLPF_CFG) != 0) return false;
 
-  // Initial bias: plain average while the robot sits still on the table.
-  delay(50);   // DLPF settle
+  delay(50);
   float sum = 0.0f;
   uint32_t n = 0;
   const uint32_t t0 = millis();
@@ -73,7 +67,7 @@ bool begin() {
     }
     delayMicroseconds(1000);
   }
-  if (n < IMU_BOOT_BIAS_MS / 2) return false;   // more than half the reads failed
+  if (n < IMU_BOOT_BIAS_MS / 2) return false;
   g_bias = sum / n;
   g_heading = 0.0f;
   g_rate = 0.0f;
@@ -89,7 +83,7 @@ void update(float dt_s, bool motorsIdle) {
     ++g_errors;
     if (g_failRun < 255) ++g_failRun;
     if (g_failRun >= IMU_FAIL_LIMIT) g_ok = false;
-    // Hold the last rate for a few missed samples (better than zero).
+
     g_heading += g_rate * dt_s;
     return;
   }
@@ -97,13 +91,10 @@ void update(float dt_s, bool motorsIdle) {
   g_rate = raw - g_bias;
   g_heading += g_rate * dt_s;
 
-  // Bias re-estimation: motors idle and no visible rotation. Every complete
-  // IMU_STILL_MS window of stillness replaces the bias with that window's mean
-  // (windows are short so the float sum never loses precision).
   if (motorsIdle && fabsf(g_rate) < IMU_STILL_RATE_DPS) {
     g_stillSum += raw;
     ++g_stillCount;
-    g_stillTime = fminf(g_stillTime + dt_s, 60.0f);   // bounded: only compared to IMU_STILL_MS
+    g_stillTime = fminf(g_stillTime + dt_s, 60.0f);
     if (g_stillTime * 1000.0f >= IMU_STILL_MS && g_stillCount * CONTROL_TICK_US >= IMU_STILL_MS * 1000u) {
       g_bias = g_stillSum / g_stillCount;
       g_stillSum = 0.0f;
@@ -123,4 +114,4 @@ bool  stationary()  { return g_stillTime * 1000.0f >= IMU_STILL_MS; }
 uint32_t errorCount() { return g_errors; }
 uint8_t  whoAmI()   { return g_whoAmI; }
 
-}  // namespace imu
+}
