@@ -565,6 +565,13 @@ void runMode(uint8_t n) {
     return;
   }
   if (n == 7) {
+    if (!ROBOT_MAZE_READY) {
+      DBG_PRINTF("match refused: the chassis cannot pivot / stop on a cell centre in a 171-189 mm cell "
+                 "(front corner swing %.0f mm, nose %.0f mm ahead of the axle). Move the axle forward.\n",
+                 sqrtf(PIVOT_CORNER_RADIUS_SQ_MM2), ROBOT_NOSE_X_MM);
+      ui::soundError();
+      return;
+    }
     strategy::runMatch();
     motors::disable();
     return;

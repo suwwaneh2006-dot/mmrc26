@@ -71,17 +71,19 @@ static_assert(PIN_SONAR_F_ECHO >= 32 && PIN_SONAR_L_ECHO >= 32 && PIN_SONAR_R_EC
 
 constexpr float WHEEL_DIAMETER_MM = 34.0f;
 
-constexpr float WHEEL_TRACK_MM    = 80.0f;
+constexpr float WHEEL_TRACK_MM    = 105.0f;
 
-constexpr float ROBOT_NOSE_X_MM   = 45.0f;
+constexpr float ROBOT_NOSE_X_MM   = 99.0f;
 
-constexpr float ROBOT_TAIL_X_MM   = 45.0f;
+constexpr float ROBOT_TAIL_X_MM   = 27.0f;
 
-constexpr float ROBOT_HALF_WIDTH_MM = 42.0f;
+constexpr float ROBOT_HALF_WIDTH_MM = 61.0f;
+constexpr float ROBOT_FRONT_HALF_WIDTH_MM = 27.0f;
+constexpr float ROBOT_WHEEL_HALF_LENGTH_MM = 17.0f;
 
 constexpr float ROBOT_HALF_LENGTH_MM = ROBOT_NOSE_X_MM > ROBOT_TAIL_X_MM ? ROBOT_NOSE_X_MM : ROBOT_TAIL_X_MM;
 
-constexpr float SONAR_F_X_MM = 40.0f, SONAR_F_Y_MM = 0.0f,   SONAR_F_ANGLE_DEG = 0.0f;
+constexpr float SONAR_F_X_MM = 99.0f, SONAR_F_Y_MM = 0.0f,   SONAR_F_ANGLE_DEG = 0.0f;
 constexpr float SONAR_L_X_MM = 20.0f, SONAR_L_Y_MM = 30.0f,  SONAR_L_ANGLE_DEG = 90.0f;
 constexpr float SONAR_R_X_MM = 20.0f, SONAR_R_Y_MM = -30.0f, SONAR_R_ANGLE_DEG = -90.0f;
 
@@ -250,8 +252,7 @@ constexpr float BRAKE_DECEL_MM_S2      = 3000.0f;
 constexpr float SONAR_LATENCY_S        = 0.04f;
 
 constexpr float COLLISION_MARGIN_MM    = 20.0f;
-static_assert(COLLISION_MARGIN_MM < HALF_CELL_INNER_MM - ROBOT_NOSE_X_MM - 5.0f,
-              "collision margin would trip on every stop in front of a wall");
+constexpr bool ROBOT_FITS_CELL_STOP = COLLISION_MARGIN_MM < HALF_CELL_INNER_MM - ROBOT_NOSE_X_MM - 5.0f;
 constexpr uint32_t SONAR_FRESH_MS      = 100;
 constexpr uint32_t MOTION_STOP_SETTLE_MS = 150;
 
@@ -284,16 +285,24 @@ constexpr float ALIGN_TOLERANCE_MM     = 3.0f;
 constexpr uint32_t ALIGN_HOLD_MS       = 100;
 constexpr uint32_t ALIGN_TIMEOUT_MS    = 1500;
 
+constexpr float PIVOT_FRONT_SQ_MM2 =
+    ROBOT_NOSE_X_MM * ROBOT_NOSE_X_MM + ROBOT_FRONT_HALF_WIDTH_MM * ROBOT_FRONT_HALF_WIDTH_MM;
+constexpr float PIVOT_WHEEL_SQ_MM2 =
+    ROBOT_WHEEL_HALF_LENGTH_MM * ROBOT_WHEEL_HALF_LENGTH_MM + ROBOT_HALF_WIDTH_MM * ROBOT_HALF_WIDTH_MM;
+constexpr float PIVOT_TAIL_SQ_MM2 =
+    ROBOT_TAIL_X_MM * ROBOT_TAIL_X_MM + ROBOT_HALF_WIDTH_MM * ROBOT_HALF_WIDTH_MM;
 constexpr float PIVOT_CORNER_RADIUS_SQ_MM2 =
-    ROBOT_HALF_LENGTH_MM * ROBOT_HALF_LENGTH_MM + ROBOT_HALF_WIDTH_MM * ROBOT_HALF_WIDTH_MM;
+    PIVOT_FRONT_SQ_MM2 > PIVOT_WHEEL_SQ_MM2
+        ? (PIVOT_FRONT_SQ_MM2 > PIVOT_TAIL_SQ_MM2 ? PIVOT_FRONT_SQ_MM2 : PIVOT_TAIL_SQ_MM2)
+        : (PIVOT_WHEEL_SQ_MM2 > PIVOT_TAIL_SQ_MM2 ? PIVOT_WHEEL_SQ_MM2 : PIVOT_TAIL_SQ_MM2);
 constexpr float PIVOT_LATERAL_LIMIT_MM = 12.0f;
 constexpr float RECENTRE_ANGLE_DEG     = 20.0f;
 constexpr float RECENTRE_MAX_OFFSET_MM = 30.0f;
 constexpr bool  PIVOT_RECENTRE         = true;
 constexpr uint32_t RECENTRE_READING_MAX_AGE_MS = 100;
-static_assert(PIVOT_CORNER_RADIUS_SQ_MM2 < (HALF_CELL_INNER_MM * (1.0f - 0.05f) - PIVOT_LATERAL_LIMIT_MM) *
-                                           (HALF_CELL_INNER_MM * (1.0f - 0.05f) - PIVOT_LATERAL_LIMIT_MM),
-              "robot too large to pivot in a -5 % cell with this lateral limit");
+constexpr bool ROBOT_CAN_PIVOT = PIVOT_CORNER_RADIUS_SQ_MM2 < (HALF_CELL_INNER_MM * (1.0f - 0.05f) - PIVOT_LATERAL_LIMIT_MM) *
+                                                       (HALF_CELL_INNER_MM * (1.0f - 0.05f) - PIVOT_LATERAL_LIMIT_MM);
+constexpr bool ROBOT_MAZE_READY = ROBOT_CAN_PIVOT && ROBOT_FITS_CELL_STOP;
 constexpr uint32_t STUCK_MS            = 400;
 constexpr float STUCK_MIN_RANGE_CHANGE_MM = 5.0f;
 constexpr float STUCK_MAX_RATE_DPS     = 3.0f;

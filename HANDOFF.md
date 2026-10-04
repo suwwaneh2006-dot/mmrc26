@@ -26,6 +26,13 @@
   - **Best simulated score** on `sim/mazes/mmrc26-island-10x10.txt`: about 2440 (14 runs, 14 returns, best 14.35 s).
 - **Not hardware-tested:** nothing has run on the real robot yet.
 
+## Chassis (measured 2026-10-04)
+
+- **Size:** 126 mm long with sensors; 122 mm wide with wheels (88 mm without); front 54 mm wide; 98 mm tall.
+- **Axle:** about 27 mm from the back, so the nose is 99 mm ahead of it. A pivot swings about 103 mm, more than the 85–94 mm a cell allows. `ROBOT_MAZE_READY` is false and **mode 7 is locked** until the axle moves towards the middle. Modes 1–6 work.
+- **Encoders:** run on 5 V, with 10k/15k dividers on GPIO 5 and 22.
+- **Track:** `WHEEL_TRACK_MM` = 105 is an estimate; measure it.
+
 ## Open items
 
 1. **Robot measurements** (the user will provide them). Fill in every `TODO_MEASURE` in `main/config.h`:

@@ -1,257 +1,147 @@
 # MMRC26 bring-up checklist
 
-Work through the steps in order. Each step lists what to wire, which test mode
-to run, what a pass looks like, and which `main/config.h` values to change if
-it fails. Don't move on until the current step passes.
+Work through the steps in order. Re-flash after every `main/config.h` change:
+Arduino IDE, board **WEMOS LOLIN32 Lite**, esp32 core 3.x, Serial Monitor at
+**115200**.
 
-Re-flash after every `config.h` change: Arduino IDE, board **WEMOS LOLIN32 Lite**,
-esp32 core 3.x, Serial Monitor at **115200**. Keep `MMRC_DEBUG 1` until the
-match day (step 12).
-
-**Choosing a mode:** click the button N times. The robot beeps N back. For
-modes 2–6, a short press starts and a long press cancels. You then get 1 s to
+**Choosing a mode:** click the button N times; the robot beeps N back. For
+modes 2–6, a short press starts and a long press cancels; you then get 1 s to
 take your hand away. A short press during a test aborts it.
 
----
+> **Chassis limit: match mode (7) is locked.** With the axle 27 mm from the
+> back, the nose is 99 mm ahead of it. A pivot then swings the front corners
+> out to about 103 mm, but a cell only gives 85–94 mm from its centre to a
+> wall. Mode 7 refuses with 3 low beeps. **Fix:** move the wheels/axle towards
+> the middle (axle about 60 mm from the back). Then update `ROBOT_NOSE_X_MM` /
+> `ROBOT_TAIL_X_MM` and mode 7 unlocks by itself. Modes 1–6 work now.
 
-## 0. Before powering anything: measure the robot
-
-Write these into `config.h`. They are the `TODO_MEASURE` values:
-
-| Value | How |
-|---|---|
-| `WHEEL_DIAMETER_MM` | calipers across the tyre |
-| `WHEEL_TRACK_MM` | centre of left tyre contact to centre of right tyre contact |
-| `ROBOT_NOSE_X_MM`, `ROBOT_TAIL_X_MM` | axle centre to the very front / very back |
-| `ROBOT_HALF_WIDTH_MM` | half the widest point, wheels included |
-| `SONAR_*_X_MM`, `SONAR_*_Y_MM`, `SONAR_*_ANGLE_DEG` | transducer face position relative to the axle centre (x forward, y left) |
-| `SONAR_AIR_TEMP_C` | thermometer at the venue (re-check on match day) |
-
-If the robot is too big to pivot in a 171 mm cell, the build fails with
-*"robot too large to pivot"*. A compile error is a hardware problem, not a
-code problem.
-
-## 1. Power and board
-
-**Wire:** 2S pack → XT30 → switch → TB6612 VM, and buck (5 V) → board 5V pin and
-sonar VCC. Common GND everywhere. **Don't connect the motors yet.**
+## 1. Wiring
 
 | Signal | GPIO | Notes |
 |---|---|---|
 | I2C SDA / SCL | 19 / 23 | MPU6050 on 3.3 V |
 | Left motor PWMA / AIN1 / AIN2 | 25 / 26 / 27 | |
 | Right motor PWMB / BIN1 / BIN2 | 32 / 33 / 13 | |
-| TB6612 STBY | 4 | LOW = motors off. A 10k pull-down to GND is recommended |
-| TRIG front / left / right | 16 / 17 / 18 | direct, 3.3 V is enough for HC-SR04 |
-| ECHO front / left / right | 35 / 36 / 39 | **through a divider each: ECHO–10k–GPIO–15k–GND** (5 V → 3.0 V) |
+| TB6612 STBY | 4 | LOW = motors off; 10k pull-down to GND recommended |
+| TRIG front / left / right | 16 / 17 / 18 | direct |
+| ECHO front / left / right | 35 / 36 / 39 | **each: ECHO–10k–GPIO–15k–GND** |
+| Left encoder channel A | 5 | **5 V encoder: A–10k–GPIO–15k–GND** |
+| Right encoder channel A | 22 | **5 V encoder: A–10k–GPIO–15k–GND** (the on-board LED flickers; harmless) |
+| Encoder VCC / GND | 5 V buck / GND | channel B unused |
 | Battery sense | 34 | **Bat+–20k–GPIO34–10k–GND** |
-| Button | 14 | to GND (internal pull-up) |
-| Status LED | 22 | on-board, active LOW |
+| Button | 14 | to GND |
 | Buzzer | 15 | |
 
-**Pass:** at power-on the LED lights for about 1 s (gyro calibration; keep the
-robot still). Serial shows `MMRC26 firmware`, a self-check list, and
-`ready: click 1-7`.
+**Never connect a 5 V signal straight to an ESP32 pin.** Power is 2S pack →
+switch → TB6612 VM, and buck 5 V → board 5V, sonars and encoders, with common
+GND everywhere.
 
-**If it resets in a loop:** check the buck output under load, and that ECHO
-pins never see 5 V.
+**Pass:** at power-on, keep the robot still for 2 s. You should hear **4
+beeps** (3 sonars + IMU) and see `ready: click 1-7` in Serial.
 
-## 2. Self-check (boot beeps)
+**If it fails:** the error code is beeped as N long low beeps, repeated:
+- 1 / 2 / 3: front / left / right sonar. Check 5 V, TRIG and the echo divider.
+- 4: IMU. Check SDA/SCL and 3.3 V.
+- 5: battery below 6.6 V.
+- 6: motor fault.
 
-**Pass:** 4 beeps (3 sonars + IMU), Serial shows `ok` for all four, and the LED
-blinks slowly.
-
-**If fewer beeps:** the LED blinks an error code. 1 = front sonar, 2 = left,
-3 = right, 4 = IMU, 5 = battery below 6.6 V, 6 = motor fault.
-- Sonar `MISSING`: check VCC 5 V, the TRIG wire, and the echo divider. With the
-  divider wired backwards the ECHO pin never rises.
-- IMU `MISSING`: check SDA/SCL and 3.3 V. `WHO_AM_I` other than 0x68 is OK on
-  clones.
-- Buzzer silent or clicking: flip `BUZZER_ACTIVE`.
-
-## 3. Mode 1: sensor dump
+## 2. Mode 1: sensors
 
 **Do:**
-- Hold a hand or box in front of each sonar at 50, 100 and 200 mm.
+- Hold a hand at 50, 100 and 200 mm in front of each sonar.
 - Turn the robot **left** by hand.
-- Measure the pack with a multimeter.
+- Turn one wheel exactly **10 turns** by hand.
 
 **Pass:**
-- Each range is within ±5 mm of the ruler.
-- `W` appears below about 120 mm on the sides and about 130 mm in front
-  (with the default sensor offsets).
-- `NW` appears when nothing is in range.
+- Ranges within ±5 mm of the ruler.
 - `hdg` increases when turning left.
-- The `[loop] overruns` count stays at 0.
+- The encoder edge count of the turned wheel rises.
+- The battery voltage matches a multimeter.
 
 **If it fails:**
 
-| Symptom | Change |
+| Symptom | Change in `config.h` |
 |---|---|
 | `hdg` decreases when turning left | `IMU_Z_SIGN = -1.0f` |
 | Battery differs from the multimeter | `BATT_CAL_FACTOR = multimeter / printed` |
-| Ranges consistently off by a factor | check `SONAR_AIR_TEMP_C` |
-| One sensor jumps or reads 20 mm | crosstalk or a loose echo divider; raise `SONAR_GAP_MS` (12 → 20) |
+| Encoder edges per turn | `ENC_EDGES_PER_WHEEL_REV = (edges after 10 turns) / 10` |
+| Encoder count doesn't move | check the encoder 5 V, GND and the divider |
+| A sonar jumps | raise `SONAR_GAP_MS` (12 → 20) |
+| Buzzer silent or clicking | flip `BUZZER_ACTIVE` |
 
-## 4. Mode 2: motor directions (wheels in the air)
+## 3. Mode 2: motors (wheels in the air)
 
-**Wire:** the motors to the TB6612 now.
-
-**Pass:** phase N is announced with N beeps:
-1. left wheel forward
-2. left wheel backward
-3. right wheel forward
-4. right wheel backward
-5. both forward
+**Pass:** 5 phases (L fwd, L back, R fwd, R back, both fwd). Each prints
+`encoders: ... ok` for the driven wheel.
 
 **If it fails:**
-- A wheel spins the wrong way: set its `MOTOR_L_INVERT` / `MOTOR_R_INVERT`.
-- The wrong wheel moves: swap the motor connectors (A ↔ B).
 
-## 5. Mode 5: velocity model (do this before modes 3, 4 and 6)
+| Symptom | Fix |
+|---|---|
+| Wheel spins the wrong way | flip `MOTOR_L_INVERT` / `MOTOR_R_INVERT` |
+| The wrong wheel moves | swap the motor connectors |
+| `CHECK` on a wheel that turned | that encoder's wiring or pin |
 
-**Do:** put the robot in a straight corridor facing a wall 450–900 mm away
-(about 3 cells), with clear floor behind it.
+## 4. Mode 5: motor model
 
-**Pass:**
-- It drives forward and backs up 7 times at rising voltages.
-- It prints `x V -> y mm/s` lines and `model: tau ...`.
-- It beeps 5 rapid beeps (`saved to NVS`).
-- After a reboot, the boot line says `model: calibrated (NVS)`.
+**Do:** put the robot in a straight corridor facing a wall 450–900 mm away.
 
-**If it fails:**
-- `outside the start window`: move the robot.
-- `only N usable points`: the floor is too slick or the wall too far. Raise
-  `CAL_STEP_V` values, or check that the front sonar sees the wall in mode 1.
+**Pass:** 5 rapid beeps (`saved to NVS`).
 
-Note the **dead-band volts** it prints. You need it below.
+## 5. Mode 3: straight 5 cells
 
-## 6. Mode 3: straight 5 cells at T1
-
-**Do:** start centred in a cell of a 5-cell corridor.
-
-**Pass:**
-- It stops 5 cells on (960 mm ± 15 mm, measured with a ruler).
-- `heading error at end` is below 2°.
-- It stays centred in the corridor without weaving.
+**Pass:** it stops 960 mm ± 15 mm along and stays centred.
 
 **If it fails:**
 
 | Symptom | Change |
 |---|---|
-| Weaves left-right | lower `HEADING_KP_V_PER_DEG` or raise `HEADING_KD_V_PER_DPS` |
-| Slowly drifts to one side | raise `HEADING_KI_V_PER_DEG_S` |
+| Distance off | `WHEEL_DIAMETER_MM *= ruler / encoder mm` (both printed) |
+| Weaves | lower `HEADING_KP_V_PER_DEG` |
+| Drifts to one side | raise `HEADING_KI_V_PER_DEG_S` |
 | Swings across the corridor | lower `CENTER_KP_DEG_PER_MM` |
-| Stays off-centre | raise `CENTER_KP_DEG_PER_MM` |
-| Stalls just short of the end | raise `PROFILE_MIN_SPEED_MM_S` to the speed of the lowest model point |
-| `stuck` abort | set `STUCK_MIN_VOLTS` to about 2× the dead-band volts |
-| `collision guard` while stopping near a wall | robot can't brake as hard as assumed: lower `BRAKE_DECEL_MM_S2` and the tier speeds |
+| Speed hunting | lower `SPEED_KP_V_PER_MM_S` |
 
-## 7. Mode 4: pivot 4 × 90° left
+## 6. Mode 4: pivot 4 × 90° (open table only, never inside the maze)
 
-**Pass:**
-- Each `turn N` shows `done` with a gyro error under 2°.
-- After 4 turns the robot faces where it started, within about 3° by eye.
+**Pass:** each turn shows `done`, error under 2°, and the robot ends facing
+where it started.
 
 **If it fails:**
+- Off by X° over 360°: `IMU_GYRO_SCALE *= 360 / (360 + X)`.
+- Overshoot or oscillation: lower `PIVOT_KP_MM_S_PER_DEG`.
+- Also measure `WHEEL_TRACK_MM` (wheel centre to wheel centre). The current
+  value, 105, is an estimate.
 
-| Symptom | Change |
-|---|---|
-| Visibly over- or under-rotates X° per full turn | `IMU_GYRO_SCALE *= 360 / (360 + X)` (X positive = over-rotated) |
-| Overshoot or oscillation at the end | lower `PIVOT_KP_MM_S_PER_DEG`, raise `PIVOT_KD_MM_S_PER_DPS` |
-| Stops short and creeps | raise `PIVOT_KP_MM_S_PER_DEG` |
-| `timeout` | as above; raise `TURN_TIMEOUT_MS` only if the turns look good |
+## 7. Mode 6: one-cell step
 
-Then set `PLAN_TURN_SETTLE_S` to the printed turn time minus the profile time.
-This only affects which speed path gets chosen.
+**Pass:** `s_est` ends at about 192 and the CSV shows a smooth speed curve.
 
-## 8. Mode 6: one-cell step + post edges
-
-**Do:** run it with a side wall that **ends** halfway (wall → gap), then copy
-the CSV into a spreadsheet.
-
-**Pass:**
-- `s_est` ends at about 192, and the front sonar moved about 192 mm.
-- `sigma` stays below 25.
-
-**Tuning:**
-- `EDGE_WALL_TO_GAP_MM` / `EDGE_GAP_TO_WALL_MM`: find the row where
-  `left_raw` / `right_raw` jumps from about 60 to 251. The value is
-  `s_est` at that row + `SONAR_*_X_MM` − (96 + 6).
-- `PLAN_SEGMENT_S`: the time between v_ref reaching 0 and the robot standing
-  still.
-
-## 9. Mode 7 on a small test maze (T1 and T2 only)
+## 8. Mode 7: match (after the axle fix)
 
 **Do:**
-1. Build a few cells including the start corner.
-2. **Wipe the map:** hold the button while switching on, until the long beep.
-3. Click 7. One beep means normal, two means mirrored; short press toggles,
-   long press confirms.
-4. Hold your hand in front of the robot (under 8 cm) for half a second, then
-   take it away.
+1. Wipe the map: hold the button at power-on until the long beep.
+2. Click 7. One beep = normal, two = mirrored; short press toggles, long
+   press confirms.
+3. Hand under 8 cm in front for half a second, then take it away.
 
-**Pass:**
-- It searches, reaches the goal, turns 180° and returns.
-- It aligns in the start cell, turns, and starts a speed run.
-- No wall contact.
-- No `ABORT` lines in Serial. Every `cell (x,y) ... walls` line matches the
-  real walls.
+**Pass:** search → goal → return → speed runs, with no wall contact.
 
-**If it fails:**
+### Match day
+1. Set `MMRC_DEBUG 0`.
+2. Battery **above 7.8 V**.
+3. Wipe the map.
+4. Check the mirror setting.
+5. Ask the judges about `AUTO_RESTART`.
 
-| Log line | Meaning / change |
-|---|---|
-| `ABORT: position lost` | raise `EST_Q_MM2_PER_MM` a little. If front fixes are rejected, check the `SONAR_F_X_MM` measurement |
-| `conflict:` during speed runs | false side-wall reads at speed; set `SPEEDRUN_WALL_CHECK = false` |
-| Wrong `walls` in a cell | check `SIDE_WALL_ON/OFF_MARGIN_MM` against the mode 1 readings |
-| `re-centring:` very often | centring is too weak (step 6) |
-| Wall touches during pivots | lower `PIVOT_LATERAL_LIMIT_MM` |
-| `loop overrun` fault | set `NVS_MIRROR_EVERY_CELL = false` |
-
-## 10. Mode 7 on a full maze
-
-**Pass:** several loops, tier T2 → T3 → T4 according to the policy, no contact.
-If T3/T4 touch walls, lower `TIERS[2]` / `TIERS[3]` speeds. The tier policy
-drops a tier after any abort anyway.
-
-## 11. Rescue drill
-
-During a run, pick the robot up (it aborts). Put it in the start cell and
-short-press. Then hand-wave: it must continue with the map it has learned.
-
-## 12. Match day
-
-- Set `MMRC_DEBUG 0` and re-flash (no Serial code in the competition build).
-- Re-measure `SONAR_AIR_TEMP_C`.
-- Ask the judges whether automatic restart is allowed. If not, set
-  `AUTO_RESTART = false`, and the robot then waits for a hand-wave between
-  loops.
-
-### Pre-match checklist
-1. Battery **> 7.8 V** (mode 1, or the multimeter).
-2. **Wipe the map**: hold the button at power-on until the long beep.
-3. Robot still for about 2 s at power-on: **4 beeps**.
-4. Click 7. **Check the mirror setting** (1 beep = maze extends right, 2 =
-   extends left), then long press.
-5. Place it centred in the start cell, facing out (`START_OFFSET_MM` assumes
-   centred).
-6. Hand-wave to start.
-
-### Beep meanings
+### Sounds
 | Sound | Meaning |
 |---|---|
 | N short beeps | a number: working parts at boot, selected mode, mirror (1/2) |
-| 1 short high | OK / confirmed / start trigger accepted |
-| 3 long low | error or refused (the LED shows the code) |
-| 2 long low | aborted (touch, collision guard, stuck, lost, fault): waiting for rescue |
+| 1 short high | OK, or start trigger seen |
+| 3 long low | refused / error (the code follows) |
+| 2 long low | aborted: waiting for rescue (place the robot at the start, short press, hand-wave) |
 | 1 very long | map wiped |
 | 5 rapid | calibration saved |
 | 2 rapid low | battery below 7.0 V |
-| 3 short (LED steady on) | match time used up |
-
-### LED
-- Slow blink: waiting.
-- On: hand detected.
-- Fast blink: about to move, or waiting for rescue.
-- N blinks + pause: error code (see step 2).
+| 3 short | match time over |
