@@ -48,6 +48,8 @@ class SimSerial {
  public:
   void begin(unsigned long baud);
   void setTxBufferSize(size_t size);
+  int available() { return 0; }
+  int read() { return -1; }
   int printf(const char* fmt, ...) __attribute__((format(printf, 2, 3)));
 };
 extern SimSerial Serial;

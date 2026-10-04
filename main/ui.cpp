@@ -1,6 +1,7 @@
 #include "ui.h"
 
 #include "motors.h"
+#include "sched.h"
 #include "sonar.h"
 
 namespace {
@@ -91,6 +92,37 @@ void buzzer(bool on, bool low) {
   g_buzzOn = on;
 }
 
+#if MMRC_DEBUG
+char     g_cmd[8];
+uint8_t  g_cmdLen = 0;
+uint8_t  g_serialMode = 0;
+bool     g_modeActive = false;
+
+void handleCommand() {
+  g_cmd[g_cmdLen] = '\0';
+  if (g_cmdLen == 1 && g_cmd[0] == 's') {
+    motors::fault(Fault::USER_ABORT);
+    if (g_modeActive) pushEvent(ui::Button::SHORT);
+    DBG_PRINTF("STOP: motors off\n");
+  } else if (g_cmdLen >= 2 && g_cmd[0] == 'm') {
+    const int n = atoi(g_cmd + 1);
+    if (n >= 1 && n <= 8 && !g_modeActive) g_serialMode = static_cast<uint8_t>(n);
+  }
+}
+
+void pollSerial() {
+  while (Serial.available() > 0) {
+    const int c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (g_cmdLen > 0) handleCommand();
+      g_cmdLen = 0;
+    } else if (g_cmdLen < sizeof(g_cmd) - 1) {
+      g_cmd[g_cmdLen++] = static_cast<char>(c);
+    }
+  }
+}
+#endif
+
 void updateBuzzer(uint32_t now) {
   if (g_patCount == 0 || static_cast<int32_t>(now - g_buzzNextMs) < 0) return;
   Pattern& p = g_pat[g_patHead];
@@ -150,6 +182,9 @@ void begin() {
 
 void update() {
   const uint32_t now = millis();
+#if MMRC_DEBUG
+  pollSerial();
+#endif
   updateButton(now);
   updateBuzzer(now);
   updateLed(now);
@@ -200,4 +235,36 @@ void led(Led mode, uint8_t code) {
   g_ledCode = code;
 }
 
+void waitBeeps() {
+  while (beepBusy()) sched::service();
+}
+
+bool waitStartPress() {
+  clearEvents();
+  led(Led::ON);
+  while (true) {
+    sched::service();
+    const Button b = event();
+    if (b == Button::SHORT) return true;
+    if (b == Button::LONG) return false;
+  }
+}
+
+uint8_t takeSerialMode() {
+#if MMRC_DEBUG
+  const uint8_t n = g_serialMode;
+  g_serialMode = 0;
+  return n;
+#else
+  return 0;
+#endif
+}
+
+void setModeActive(bool active) {
+#if MMRC_DEBUG
+  g_modeActive = active;
+#else
+  (void)active;
+#endif
+}
 }

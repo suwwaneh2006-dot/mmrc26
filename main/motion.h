@@ -55,6 +55,11 @@ const char* resultName(Result r);
 
 Telemetry telemetry();
 float headingTargetDeg();
+
+bool   arm();
+Result waitDone();
+float  settledFrontMm();
+void   reportFault();
 void  setHeadingTargetDeg(float deg);
 
 }

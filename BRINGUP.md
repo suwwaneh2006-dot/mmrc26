@@ -21,6 +21,15 @@ as one:
 | **Leave match mode** | hold for 3 s |
 | **Rescue after an abort** | put the robot in the start cell, then click |
 
+## Serial commands (MMRC_DEBUG 1, 115200 baud)
+
+| Command | Effect |
+|---|---|
+| `m<N>` (for example `m1`) | starts mode N immediately, without the button |
+| `s` | stops the current mode and cuts the motors at once |
+
+Helper: `python tools/serial_probe.py COMx m1 10` sends `m1` and prints 10 s of output.
+
 ## 1. Wiring
 
 | Signal | GPIO | Notes |

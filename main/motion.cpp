@@ -7,6 +7,7 @@
 #include "motors.h"
 #include "sched.h"
 #include "sonar.h"
+#include "ui.h"
 
 namespace {
 
@@ -464,4 +465,32 @@ Telemetry telemetry() {
 float headingTargetDeg() { return g_headingTarget; }
 void  setHeadingTargetDeg(float deg) { g_headingTarget = deg; }
 
+bool arm() {
+  motors::clearFault();
+  encoders::clearFaults();
+  setHeadingTargetDeg(imu::headingDeg());
+  return motors::enable();
+}
+
+Result waitDone() {
+  ui::clearEvents();
+  while (busy()) {
+    sched::service();
+    if (ui::event() == ui::Button::SHORT) stop();
+  }
+  return result();
+}
+
+float settledFrontMm() {
+  sched::waitMs(150);
+  const sonar::Reading r = sonar::read(sonar::FRONT);
+  return r.inRange ? r.mm : -1.0f;
+}
+
+void reportFault() {
+  if (motors::faultCode() != Fault::NONE) {
+    DBG_PRINTF("!! motor fault latched: %s\n", faultName(motors::faultCode()));
+    ui::soundAbort();
+  }
+}
 }

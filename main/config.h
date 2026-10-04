@@ -2,7 +2,9 @@
 
 #include <stdint.h>
 
+#ifndef MMRC_DEBUG
 #define MMRC_DEBUG 1
+#endif
 
 constexpr int   MAZE_SIZE_CELLS   = 10;
 constexpr float CELL_INNER_MM     = 180.0f;

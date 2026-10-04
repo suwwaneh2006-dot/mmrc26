@@ -38,4 +38,10 @@ void soundBatteryWarn();
 
 void led(Led mode, uint8_t code = 0);
 
+void waitBeeps();
+bool waitStartPress();
+
+uint8_t takeSerialMode();
+void setModeActive(bool active);
+
 }
