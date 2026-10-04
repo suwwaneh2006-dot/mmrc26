@@ -7,7 +7,7 @@ set MPU=%USERPROFILE%\Documents\Arduino\libraries\MPU6050_light\src
 set FW=..\..\main
 "%GXX%" -std=gnu++14 -O2 -Wall -Wextra -static -DARDUINO=10800 -Ishim -I%FW% -I%MPU% -I.. ^
   robot_sim.cpp hal.cpp ..\truemaze.cpp "%MPU%\MPU6050_light.cpp" ^
-  %FW%\battery.cpp %FW%\calib.cpp %FW%\encoders.cpp %FW%\estimator.cpp %FW%\imu.cpp %FW%\maze.cpp %FW%\modes.cpp %FW%\mode1_sensors.cpp %FW%\mode2_motors.cpp %FW%\mode3_straight.cpp %FW%\mode4_pivot.cpp %FW%\mode5_motor_model.cpp %FW%\mode6_step.cpp %FW%\mode7_match.cpp %FW%\mode8_auto_calibration.cpp %FW%\motion.cpp ^
+  %FW%\battery.cpp %FW%\calib.cpp %FW%\encoders.cpp %FW%\estimator.cpp %FW%\imu.cpp %FW%\maze.cpp %FW%\modes.cpp %FW%\mode1_sensors.cpp %FW%\mode2_motors.cpp %FW%\mode3_straight.cpp %FW%\mode4_pivot.cpp %FW%\mode5_motor_model.cpp %FW%\mode6_step.cpp %FW%\mode7_match.cpp %FW%\mode8_auto_calibration.cpp %FW%\test_components.cpp %FW%\motion.cpp ^
   %FW%\motors.cpp %FW%\sched.cpp %FW%\sonar.cpp %FW%\strategy.cpp %FW%\ui.cpp ^
   -x c++ %FW%\main.ino -x none -o robot_sim.exe
 if errorlevel 1 (

@@ -176,6 +176,7 @@ void bootSelfCheck(bool imuOk) {
   ui::waitBeeps();
   if (working < 4) ui::soundError();
   showIdleLed();
+  autoTest();
   DBG_PRINTF("ready: click 1-8 to select a mode.\n");
 }
 

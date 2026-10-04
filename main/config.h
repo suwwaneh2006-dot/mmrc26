@@ -210,6 +210,7 @@ constexpr float    BATT_REFUSE_ARM_V      = 6.6f;
 constexpr float    BATT_CUTOFF_LOAD_V     = 6.4f;
 
 constexpr uint32_t BOOT_DELAY_MS        = 1000;
+constexpr uint8_t  AUTO_TEST            = 1;
 constexpr bool     USE_SONAR_BUTTON     = true;
 constexpr uint32_t SERIAL_CMD_IDLE_MS   = 50;
 constexpr float    SONAR_BUTTON_NEAR_MM = 50.0f;

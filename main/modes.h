@@ -10,6 +10,7 @@ void bootWipeCheck();
 void bootSelfCheck(bool imuOk);
 
 void menu();
+void autoTest();
 
 void mode1Sensors();
 void mode2Motors();
