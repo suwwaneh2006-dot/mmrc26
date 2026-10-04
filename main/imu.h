@@ -12,6 +12,7 @@ void update(float dt_s, bool motorsIdle);
 bool  ok();
 float rateDps();
 void  setDirectionScale(float cw, float ccw);
+void  setSign(float sign);
 float headingDeg();
 void  setHeading(float deg);
 float biasDps();

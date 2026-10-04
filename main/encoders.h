@@ -21,7 +21,7 @@ bool healthy();
 bool leftFaulty();
 bool rightFaulty();
 void clearFaults();
-void setDirectionScale(float forward, float backward);
+void setMmPerEdge(int wheel, float forward, float backward);
 
 bool leftUsable();
 bool rightUsable();

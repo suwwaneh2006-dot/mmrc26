@@ -15,6 +15,7 @@
 void setup() {
 
   motors::begin();
+  delay(BOOT_DELAY_MS);
   ui::begin();
   DBG_BEGIN(115200);
   DBG_PRINTF("\nMMRC26 firmware\n");

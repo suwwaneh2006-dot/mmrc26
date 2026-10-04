@@ -1,55 +1,51 @@
 # MMRC26 micromouse firmware: handoff
 
+Repository: https://github.com/suwwaneh2006-dot/mmrc26 (branch `main`)
+
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `main/` | Arduino sketch (ESP32, LOLIN32 Lite, esp32 core 3.x): `config.h`, `motors.*`, `encoders.*`, `sonar.*`, `imu.*`, `battery.*`, `ui.*`, `sched.*`, `estimator.*`, `motion.*`, `maze.*`, `strategy.*`, `modes.*`, `main.ino` |
-| `sim/` | maze-brain tests and the mms simulator mouse (`build_mms.bat` → `mouse.exe`, `run_tests.bat`) |
-| `sim/robot/` | closed-loop simulator of the complete firmware (`build_robot_sim.bat`, `robot_sim.exe`, `run_matrix.ps1`) |
-| `BRINGUP.md` | hardware test checklist; **out of date** (written before the encoders, still mentions the LED) |
+| `main/` | Arduino sketch (ESP32 LOLIN32 Lite, esp32 core 3.x): `config.h`, `motors`, `encoders`, `sonar`, `imu`, `battery`, `ui`, `sched`, `calib`, `estimator`, `motion`, `maze`, `strategy`, `modes`, `main.ino` |
+| `sim/` | maze-brain batch tests (`run_tests.bat`) and the mms simulator mouse (`build_mms.bat`) |
+| `sim/robot/` | full-firmware simulator (`build_robot_sim.bat`, `robot_sim.exe`, `run_matrix.ps1`) |
+| `BRINGUP.md` | wiring and test procedure |
 
-## Current state
+There are no comments anywhere in the code, as requested.
 
-- **Exploring method:** flood fill (`EXPLORE_WALL_HUG = false`). Wall hugging is still in the code but can't reach an island goal: it reached 3 of 20 simulated island mazes.
-- **Encoders:** N20 hall, one channel per wheel. Left on GPIO 5, right on GPIO 22 (the on-board LED pin is reused, so error codes are beeped).
-  - Encoder odometry plus sonar corrections (front wall, any wall ahead, post edges).
-  - Closed-loop forward speed. Pivot wheel feedback is off (`PIVOT_WHEEL_FEEDBACK = false`), because the gyro alone settles faster.
-  - Stuck detection from the wheels.
-  - Automatic fallback to the voltage model if an encoder is silent while driven. A wheel is left out after 60 ms and declared faulty after 300 ms; a fault clears itself once the encoder counts again.
-- **Build:** ESP32 compiles with zero warnings, `MMRC_DEBUG` 1 and 0.
-- **Verified in simulation:**
-  - **Brain:** 590 mazefiles mazes and 20 generated 10×10 island mazes pass (normal and mirrored); 10 skipped as unreachable in the file.
-  - **Full-firmware matches, normal conditions:** 60/60 pass, 0 crashes.
-  - **Harsh conditions:** 57/60 pass, 3 crashes (maze 11 mirrored ×0.85, 14 ×1.15, 18 mirrored ×0.85). Not investigated.
-  - **Encoder failures:** both dead from power-on, and one dying mid-match, both pass with 0 aborts.
-  - **Best simulated score** on `sim/mazes/mmrc26-island-10x10.txt`: about 2440 (14 runs, 14 returns, best 14.35 s).
-- **Not hardware-tested:** nothing has run on the real robot yet.
+## Hardware assumed
 
-## Chassis (measured 2026-10-04)
+- **Chassis:** 126 mm long, 122 mm wide with wheels, 88 mm body, 54 mm wide at the front.
+- **Axle:** assumed centred (nose and tail 63 mm). Pivoting inside a cell was verified on the real robot: `ROBOT_PIVOT_VERIFIED`.
+- **Sensors:** front sonar at the nose; side sonars 45 mm ahead of the axle, 27 mm to each side.
+- **Encoders:** N20 hall, 5 V, channel A only, on GPIO 5 / 22 through 10k/15k dividers.
+- **Not fitted:** no buzzer, no button, no power switch. The front sonar acts as the button, and all feedback is over Serial.
+- **Battery:** already calibrated.
 
-- **Size:** 126 mm long with sensors; 122 mm wide with wheels (88 mm without); front 54 mm wide; 98 mm tall.
-- **Axle:** about 27 mm from the back, so the nose is 99 mm ahead of it. A pivot swings about 103 mm, more than the 85–94 mm a cell allows. `ROBOT_MAZE_READY` is false and **mode 7 is locked** until the axle moves towards the middle. Modes 1–6 work.
-- **Encoders:** run on 5 V, with 10k/15k dividers on GPIO 5 and 22.
-- **Track:** `WHEEL_TRACK_MM` = 105 is an estimate; measure it.
+## Firmware state
 
-## Open items
+- **Maze brain:** flood fill (`EXPLORE_WALL_HUG = false`); speed runs take the fastest path on verified walls only.
+- **Localisation:** encoder odometry, corrected by the sonar against the front wall, any wall straight ahead, and post edges. If an encoder fails, the motor model takes over (wheel suspect after 60 ms, fault after 300 ms, automatic recovery).
+- **Safety:**
+  - every stop in front of a wall keeps the nose at least 15 mm away (collision guard margin 6 mm);
+  - before every pivot: fresh readings, front back-off if needed, re-centring if more than 5 mm off-centre;
+  - match speed capped at T1/T2.
+- **Mode 8 (full auto-calibration):** motor wiring, gyro sign, mm per edge for each wheel and direction, CW and CCW gyro scale, track width, and the motor model. Saved in NVS and applied at every boot.
+- **Boot:** STBY is pulled low first, then a 1000 ms delay (`BOOT_DELAY_MS`).
+- **Builds:** ESP32 with zero warnings in both `MMRC_DEBUG` modes.
 
-1. **Robot measurements** (the user will provide them). Fill in every `TODO_MEASURE` in `main/config.h`:
-   - wheel diameter, track,
-   - nose, tail and half-width,
-   - sonar positions,
-   - `ENC_EDGES_PER_WHEEL_REV`, `IMU_Z_SIGN`, `BATT_CAL_FACTOR`, `BUZZER_ACTIVE`,
-   - `START_OFFSET_MM`, `SONAR_AIR_TEMP_C`, edge offsets.
+## Verified in simulation (real chassis shape)
 
-   Then recompile; `static_assert`s catch a robot too big to pivot or a duplicated GPIO.
-2. **Encoder supply voltage unknown.** If the encoders run on 5 V, each output needs a 10k/15k divider to 3.3 V before GPIO 5/22.
-3. **Comments removed** from every code file and build script. The ESP32 binary is the same size as before, and all simulated tests still pass.
-4. **Harsh crashes (3 of 60), cause partly found:** under harsh gyro noise the firmware's heading picks up a jump of about 2° during some pivots, which builds up to about 5°. Wall centring and that heading error then cancel out, and the robot clips a wall at the next pivot. Not fixed. `PARALLEL_MAX_FIX_DEG` was raised to 10, which did not remove these crashes. Reproduce with `robot_sim.exe ..\mazes\generated\mmrc26-island-10x10-14.txt --seed 1098 --model-error 1.15 --harsh`.
-5. **`BRINGUP.md`:** update it for the encoders and beeped error codes, or delete it per the no-notes request.
-6. **Hardware bring-up order:** modes 1 → 2 (check that the encoders count in the right direction) → 5 → 3 → 4 → 6 → 7 on a small maze → full maze.
-7. **Match day:** set `MMRC_DEBUG 0`, wipe the map (hold the button at power-on), check the mirror setting, battery above 7.8 V, and ask the judges about `AUTO_RESTART`.
+- **Maze brain:** 590/590 maze files pass, normal and mirrored.
+- **Auto-calibration:** passes with normal wiring and with a reversed left motor plus a flipped gyro; values within about 0–2% of the truth; no wall contact.
+- **Full matches (normal, mirrored with slow motors, dead encoders):** 0 aborts, 0 crashes, 0 wrong walls.
+- **60-match matrices:** see the final commit message for the normal and harsh results.
 
-## Repository
+## Next steps
 
-https://github.com/suwwaneh2006-dot/mmrc26 (branch `main`)
+Work through `BRINGUP.md`:
+1. wiring,
+2. mode 1, then mode 2,
+3. **mode 8**,
+4. modes 3, 6, 4,
+5. mode 7.

@@ -23,6 +23,9 @@ struct Params {
   float    gyroNoiseDps = 0.05f;
 
   bool     encoders = true;
+  bool     invertLeftMotor = false;
+  bool     gyroFlipped = false;
+  bool     openFloor = false;
   float    encoderFailAtS = -1.0f;
   float    wheelDiameterFactor = 1.02f;
 };

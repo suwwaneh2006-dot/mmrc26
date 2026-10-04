@@ -110,6 +110,13 @@ uint8_t readClicks() {
       ++n;
       lastClickMs = millis();
     } else if (b == ui::Button::LONG) {
+      Preferences prefs;
+      if (prefs.begin(NVS_MAP_NAMESPACE, false)) {
+        prefs.clear();
+        prefs.end();
+      }
+      DBG_PRINTF("map wiped.\n");
+      ui::soundWiped();
       return 0;
     }
     if (n > 0 && !ui::buttonDown() && millis() - lastClickMs > CLICK_GAP_MS) return n;
@@ -542,8 +549,6 @@ void modeStepTest() {
   else ui::soundAbort();
 }
 
-float encoderTravel() { return 0.5f * (encoders::leftMm() + encoders::rightMm()); }
-
 constexpr int CAL8_MAX_SAMPLES = 900;
 float g_scanHeading[CAL8_MAX_SAMPLES];
 float g_scanRange[CAL8_MAX_SAMPLES];
@@ -573,21 +578,19 @@ bool fitMinimum(int n, float centre, float& minHeading) {
                     a[0][2] * (a[1][0] * t[2] - t[1] * a[2][0]);
   const double dc = a[0][0] * (a[1][1] * t[2] - t[1] * a[2][1]) - a[0][1] * (a[1][0] * t[2] - t[1] * a[2][0]) +
                     t[0] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
-  const double b = db / det, c = dc / det;
-  if (c <= 0.0) return false;
-  const double vertex = -b / (2.0 * c);
+  const double b = db / det, cc = dc / det;
+  if (cc <= 0.0) return false;
+  const double vertex = -b / (2.0 * cc);
   if (fabs(vertex) > CAL8_WINDOW_DEG) return false;
   minHeading = static_cast<float>(centre + vertex);
   return true;
 }
 
-bool scanTurn(float dir, float& measuredDeg) {
-  const float start = motion::headingTargetDeg();
-  motion::pivot(-dir * CAL8_SCAN_MARGIN_DEG, CAL8_TIER);
-  if (waitMotion() != motion::Result::DONE) return false;
-  int n = 0;
+bool sweep(float angleDeg, int& n, uint32_t& edgesL, uint32_t& edgesR) {
+  n = 0;
+  const uint32_t l0 = encoders::leftEdges(), r0 = encoders::rightEdges();
   uint32_t seq = sonar::read(sonar::FRONT).seq;
-  motion::pivot(dir * (360.0f + 2.0f * CAL8_SCAN_MARGIN_DEG), CAL8_TIER);
+  motion::pivot(angleDeg, CAL8_TIER);
   ui::clearEvents();
   while (motion::busy()) {
     sched::service();
@@ -602,88 +605,255 @@ bool scanTurn(float dir, float& measuredDeg) {
       }
     }
   }
-  if (motion::result() != motion::Result::DONE) return false;
-  motion::pivot(-dir * CAL8_SCAN_MARGIN_DEG, CAL8_TIER);
-  if (waitMotion() != motion::Result::DONE) return false;
-  float m1, m2;
-  if (!fitMinimum(n, start, m1) || !fitMinimum(n, start + dir * 360.0f, m2)) {
-    DBG_PRINTF("   no clear wall minimum in the scan (%d samples)\n", n);
-    return false;
-  }
-  measuredDeg = fabsf(m2 - m1);
-  return measuredDeg > 300.0f && measuredDeg < 420.0f;
+  edgesL = encoders::leftEdges() - l0;
+  edgesR = encoders::rightEdges() - r0;
+  return motion::result() == motion::Result::DONE;
 }
 
-void modeDirectionCal() {
-  DBG_PRINTF("\n== MODE 8: direction calibration: forward, right, left, back ==\n");
-  DBG_PRINTF("Face a flat wall %.0f-%.0f mm ahead, open space around, room behind.\n", CAL8_MIN_FRONT_MM,
-             CAL8_MAX_FRONT_MM);
+bool turnBy(float angleDeg) {
+  motion::pivot(angleDeg, CAL8_TIER);
+  return waitMotion() == motion::Result::DONE;
+}
+
+struct Probe {
+  bool  ok;
+  float dFront;
+  float dHeading;
+};
+
+Probe probe(float vl, float vr) {
+  Probe p{false, 0.0f, 0.0f};
   const float f0 = settledFrontMm();
-  if (f0 < CAL8_MIN_FRONT_MM || f0 > CAL8_MAX_FRONT_MM) {
-    DBG_PRINTF("front range %.0f mm outside the window - refused.\n", f0);
+  const float h0 = imu::headingDeg();
+  motion::rawVolts(vl, vr);
+  sched::waitMs(CAL_PROBE_MS);
+  motion::stop();
+  waitMotion();
+  const float f1 = settledFrontMm();
+  p.dHeading = imu::headingDeg() - h0;
+  p.dFront = f1 - f0;
+  p.ok = f0 > 0.0f && f1 > 0.0f && motors::faultCode() == Fault::NONE;
+  if (motors::faultCode() != Fault::NONE) p.ok = false;
+  return p;
+}
+
+void resetHeadingFrame() {
+  imu::setHeading(0.0f);
+  motion::setHeadingTargetDeg(0.0f);
+}
+
+bool backToRange(float targetFront) {
+  const float f = settledFrontMm();
+  if (f <= 0.0f || f >= targetFront - 5.0f) return true;
+  motion::reverse(targetFront - f, CAL8_TIER);
+  return waitMotion() == motion::Result::DONE;
+}
+
+bool calWiring(calib::Data& d) {
+  Probe p = probe(CAL_PROBE_V, CAL_PROBE_V);
+  if (!p.ok) return false;
+  const bool spin = fabsf(p.dHeading) > CAL_PROBE_SPIN_DEG;
+  if (!spin && p.dFront < -CAL_PROBE_MOVE_MM) return true;
+  if (!spin && p.dFront > CAL_PROBE_MOVE_MM) {
+    d.invertLeft ^= 1;
+    d.invertRight ^= 1;
+    calib::applyWithoutSaving(d);
+    return true;
+  }
+  if (!spin) return false;
+  probe(-CAL_PROBE_V, -CAL_PROBE_V);
+  d.invertLeft ^= 1;
+  calib::applyWithoutSaving(d);
+  const Probe q = probe(CAL_PROBE_V, CAL_PROBE_V);
+  if (!q.ok || fabsf(q.dHeading) > CAL_PROBE_SPIN_DEG) {
+    probe(-CAL_PROBE_V, -CAL_PROBE_V);
+    return false;
+  }
+  if (q.dFront > CAL_PROBE_MOVE_MM) {
+    d.invertLeft ^= 1;
+    d.invertRight ^= 1;
+    calib::applyWithoutSaving(d);
+    return true;
+  }
+  return q.dFront < -CAL_PROBE_MOVE_MM;
+}
+
+bool calGyroSign(calib::Data& d) {
+  const Probe p = probe(CAL_PROBE_V, -CAL_PROBE_V);
+  if (fabsf(p.dHeading) < CAL_PROBE_SPIN_DEG) return false;
+  if (p.dHeading > 0.0f) {
+    d.gyroSign = -d.gyroSign;
+    calib::applyWithoutSaving(d);
+  }
+  const Probe q = probe(-CAL_PROBE_V, CAL_PROBE_V);
+  resetHeadingFrame();
+  return motors::faultCode() == Fault::NONE && fabsf(q.dHeading) >= CAL_PROBE_SPIN_DEG;
+}
+
+bool findWall() {
+  resetHeadingFrame();
+  if (!turnBy(-CAL_FIND_WALL_DEG)) return false;
+  int n;
+  uint32_t el, er;
+  if (!sweep(2.0f * CAL_FIND_WALL_DEG, n, el, er)) return false;
+  float m;
+  if (!fitMinimum(n, 0.0f, m)) {
+    turnBy(-CAL_FIND_WALL_DEG);
+    resetHeadingFrame();
+    return false;
+  }
+  if (!turnBy(m - motion::headingTargetDeg())) return false;
+  resetHeadingFrame();
+  return true;
+}
+
+bool calStraight(bool forward, calib::Data& d, float& travelTrue) {
+  const float f0 = settledFrontMm();
+  const uint32_t l0 = encoders::leftEdges(), r0 = encoders::rightEdges();
+  if (forward) motion::straight(f0 - CAL8_STOP_FRONT_MM, CAL8_TIER);
+  else motion::reverse(travelTrue - 20.0f, CAL8_TIER);
+  const motion::Result res = waitMotion();
+  if (res != motion::Result::DONE) {
+    DBG_PRINTF("%-8s: motion ended with %s\n", forward ? "forward" : "back", motion::resultName(res));
+    return false;
+  }
+  const float f1 = settledFrontMm();
+  const float dTrue = forward ? f0 - f1 : f1 - f0;
+  DBG_PRINTF("%-8s: front %.0f -> %.0f mm\n", forward ? "forward" : "back", f0, f1);
+  const float el = static_cast<float>(encoders::leftEdges() - l0);
+  const float er = static_cast<float>(encoders::rightEdges() - r0);
+  if (f0 <= 0.0f || f1 <= 0.0f || dTrue < CAL8_MIN_TRAVEL_MM || el < 20.0f || er < 20.0f) return false;
+  const int k = forward ? 0 : 1;
+  d.mmPerEdge[0][k] = dTrue / el;
+  d.mmPerEdge[1][k] = dTrue / er;
+  calib::applyWithoutSaving(d);
+  travelTrue = dTrue;
+  DBG_PRINTF("%-8s: sonar %.1f mm, edges L %.0f R %.0f -> mm/edge L %.4f R %.4f\n", forward ? "forward" : "back",
+             dTrue, el, er, d.mmPerEdge[0][k], d.mmPerEdge[1][k]);
+  return true;
+}
+
+bool calTurn(float dir, calib::Data& d, uint32_t& edgesL, uint32_t& edgesR, float& trueSweepRad) {
+  resetHeadingFrame();
+  const float sweepDeg = 360.0f + 2.0f * CAL8_SCAN_MARGIN_DEG;
+  if (!turnBy(-dir * CAL8_SCAN_MARGIN_DEG)) return false;
+  int n;
+  if (!sweep(dir * sweepDeg, n, edgesL, edgesR)) return false;
+  if (!turnBy(-dir * CAL8_SCAN_MARGIN_DEG)) return false;
+  float m1, m2;
+  if (!fitMinimum(n, 0.0f, m1) || !fitMinimum(n, dir * 360.0f, m2)) return false;
+  const float measured = fabsf(m2 - m1);
+  if (measured < 300.0f || measured > 420.0f) return false;
+  float& scale = dir < 0.0f ? d.cw : d.ccw;
+  scale *= 360.0f / measured;
+  trueSweepRad = sweepDeg * (360.0f / measured) * 0.01745329f;
+  calib::applyWithoutSaving(d);
+  resetHeadingFrame();
+  DBG_PRINTF("%-8s: gyro %.2f deg per true 360 -> scale %.4f\n", dir < 0.0f ? "right" : "left", measured, scale);
+  return true;
+}
+
+bool calModel() {
+  VelocityModel m = motors::defaultModel();
+  float pv[CAL_SPIN_STEPS], ps[CAL_SPIN_STEPS];
+  int np = 0;
+  float tau = MODEL_DEFAULT_TAU_S;
+  for (int i = 0; i < CAL_SPIN_STEPS; ++i) {
+    const float v = CAL_SPIN_V[i];
+    const uint32_t t0 = millis();
+    motion::rawVolts(v, -v);
+    float sum = 0.0f;
+    int cnt = 0;
+    float target63 = -1.0f;
+    uint32_t t63 = 0;
+    while (millis() - t0 < CAL_SPIN_HOLD_MS) {
+      sched::service();
+      if (motors::faultCode() != Fault::NONE) return false;
+      const float sp = 0.5f * (fabsf(encoders::leftSpeed()) + fabsf(encoders::rightSpeed()));
+      if (millis() - t0 >= CAL_SPIN_HOLD_MS - CAL_SPIN_MEASURE_MS) {
+        sum += sp;
+        ++cnt;
+      }
+      if (i == CAL_SPIN_STEPS / 2 && t63 == 0 && target63 > 0.0f && sp >= target63) t63 = millis() - t0;
+      if (i == CAL_SPIN_STEPS / 2 && target63 < 0.0f && np > 0) target63 = 0.63f * ps[np - 1] * v / pv[np - 1];
+    }
+    motion::stop();
+    waitMotion();
+    const float speed = cnt > 0 ? sum / cnt : 0.0f;
+    if (speed >= CAL_MIN_SPEED_MM_S && (np == 0 || speed > ps[np - 1])) {
+      pv[np] = v;
+      ps[np] = speed;
+      ++np;
+    }
+    if (t63 > 0) tau = fminf(fmaxf(t63 * 1e-3f - 0.5f * v / MOTOR_SLEW_V_PER_S, 0.01f), 0.3f);
+  }
+  if (np < CAL_MIN_POINTS) return false;
+  float v0 = pv[0] - ps[0] * (pv[1] - pv[0]) / (ps[1] - ps[0]);
+  v0 = fminf(fmaxf(v0, 0.0f), pv[0] - 0.05f);
+  m.count = 0;
+  m.volts[m.count] = v0;
+  m.mm_s[m.count] = 0.0f;
+  ++m.count;
+  for (int i = 0; i < np && m.count < MODEL_MAX_POINTS; ++i) {
+    m.volts[m.count] = pv[i];
+    m.mm_s[m.count] = ps[i];
+    ++m.count;
+  }
+  m.tau_s = tau;
+  DBG_PRINTF("model   : dead-band %.2f V, tau %.0f ms, %d points, top %.0f mm/s at %.1f V\n", v0, tau * 1000.0f,
+             np, ps[np - 1], pv[np - 1]);
+  return motors::saveModel(m);
+}
+
+void modeAutoCalibrateAll() {
+  DBG_PRINTF("\n== MODE 8: full auto-calibration ==\n");
+  DBG_PRINTF("Face a flat wall %.0f-%.0f mm ahead, open floor all around (robot spins), room behind.\n",
+             CAL8_MIN_FRONT_MM, CAL8_MAX_FRONT_MM);
+  const float fStart = settledFrontMm();
+  if (fStart < CAL8_MIN_FRONT_MM || fStart > CAL8_MAX_FRONT_MM) {
+    DBG_PRINTF("front range %.0f mm outside the window - refused.\n", fStart);
     ui::soundError();
     return;
   }
+  calib::Data d = calib::get();
+  d.mmPerEdge[0][0] = d.mmPerEdge[0][1] = d.mmPerEdge[1][0] = d.mmPerEdge[1][1] = ENC_MM_PER_EDGE;
+  d.cw = d.ccw = 1.0f;
+  calib::applyWithoutSaving(d);
   if (!armMotors()) return;
   sonar::setFrontOnly(true);
-  calib::Direction d = calib::get();
-  bool ok = true;
+  const char* failed = nullptr;
+  uint32_t cwL = 0, cwR = 0, ccwL = 0, ccwR = 0;
+  float cwRad = 0.0f, ccwRad = 0.0f, travel = 0.0f;
 
-  const float e0 = encoderTravel();
-  motion::straight(f0 - CAL8_STOP_FRONT_MM, CAL8_TIER);
-  ok = waitMotion() == motion::Result::DONE;
-  const float f1 = settledFrontMm();
-  const float fwdTrue = f0 - f1, fwdEnc = encoderTravel() - e0;
-  if (ok && f1 > 0.0f && fwdEnc > CAL8_MIN_TRAVEL_MM && fwdTrue > CAL8_MIN_TRAVEL_MM) {
-    d.forward *= fwdTrue / fwdEnc;
-    DBG_PRINTF("forward : sonar %.1f mm, encoders %.1f mm -> scale %.4f\n", fwdTrue, fwdEnc, d.forward);
-  } else {
-    ok = false;
-    DBG_PRINTF("forward : FAILED\n");
+  if (!calWiring(d)) failed = "motor wiring";
+  else DBG_PRINTF("wiring  : left %s, right %s\n", d.invertLeft ? "INVERTED" : "normal", d.invertRight ? "INVERTED" : "normal");
+  if (!failed && !calGyroSign(d)) failed = "gyro sign";
+  else if (!failed) DBG_PRINTF("gyro    : sign %+.0f\n", d.gyroSign);
+  if (!failed && !backToRange(fStart)) failed = "return to start";
+  if (!failed && !findWall()) failed = "square up on the wall";
+  if (!failed && !calStraight(true, d, travel)) failed = "forward";
+  if (!failed && !calTurn(-1.0f, d, cwL, cwR, cwRad)) failed = "right turn";
+  if (!failed && !calTurn(1.0f, d, ccwL, ccwR, ccwRad)) failed = "left turn";
+  if (!failed && !calStraight(false, d, travel)) failed = "back";
+  if (!failed) {
+    const float trackCw = (cwL * d.mmPerEdge[0][0] + cwR * d.mmPerEdge[1][1]) / cwRad;
+    const float trackCcw = (ccwL * d.mmPerEdge[0][1] + ccwR * d.mmPerEdge[1][0]) / ccwRad;
+    d.trackMm = 0.5f * (trackCw + trackCcw);
+    DBG_PRINTF("track   : right %.1f mm, left %.1f mm -> %.1f mm\n", trackCw, trackCcw, d.trackMm);
   }
-
-  float deg = 0.0f;
-  if (ok && scanTurn(-1.0f, deg)) {
-    d.cw *= 360.0f / deg;
-    DBG_PRINTF("right   : gyro measured %.2f deg for 360 -> scale %.4f\n", deg, d.cw);
-  } else {
-    ok = false;
-    DBG_PRINTF("right   : FAILED\n");
-  }
-
-  if (ok && scanTurn(1.0f, deg)) {
-    d.ccw *= 360.0f / deg;
-    DBG_PRINTF("left    : gyro measured %.2f deg for 360 -> scale %.4f\n", deg, d.ccw);
-  } else {
-    ok = false;
-    DBG_PRINTF("left    : FAILED\n");
-  }
-
-  if (ok) {
-    const float b0 = settledFrontMm();
-    const float eb = encoderTravel();
-    motion::reverse(fminf(fwdTrue, CAL8_MAX_FRONT_MM) - 20.0f, CAL8_TIER);
-    ok = waitMotion() == motion::Result::DONE;
-    const float b1 = settledFrontMm();
-    const float backTrue = b1 - b0, backEnc = eb - encoderTravel();
-    if (ok && b0 > 0.0f && b1 > 0.0f && backEnc > CAL8_MIN_TRAVEL_MM && backTrue > CAL8_MIN_TRAVEL_MM) {
-      d.backward *= backTrue / backEnc;
-      DBG_PRINTF("back    : sonar %.1f mm, encoders %.1f mm -> scale %.4f\n", backTrue, backEnc, d.backward);
-    } else {
-      ok = false;
-      DBG_PRINTF("back    : FAILED\n");
-    }
-  }
+  if (!failed && !calModel()) failed = "motor model";
 
   sonar::setFrontOnly(false);
   motors::disable();
   reportFaultIfAny();
-  if (ok && calib::save(d)) {
-    DBG_PRINTF("saved: forward %.4f back %.4f right %.4f left %.4f\n", d.forward, d.backward, d.cw, d.ccw);
+  if (!failed && calib::save(d)) {
+    DBG_PRINTF("saved: wiring L%d R%d, gyro %+.0f, mm/edge L %.4f/%.4f R %.4f/%.4f, right %.4f, left %.4f, track %.1f\n",
+               d.invertLeft, d.invertRight, d.gyroSign, d.mmPerEdge[0][0], d.mmPerEdge[0][1], d.mmPerEdge[1][0],
+               d.mmPerEdge[1][1], d.cw, d.ccw, d.trackMm);
     ui::soundCalSaved();
   } else {
-    DBG_PRINTF("calibration not saved (a step failed or a scale is outside %.2f-%.2f).\n", CAL8_SCALE_MIN,
-               CAL8_SCALE_MAX);
+    DBG_PRINTF("calibration not saved: %s failed or a value is out of range.\n", failed ? failed : "a check");
+    calib::begin();
     ui::soundError();
   }
 }
@@ -736,7 +906,7 @@ void runMode(uint8_t n) {
     case 4: modePivot4(); break;
     case 5: modeAutoCal(); break;
     case 6: modeStepTest(); break;
-    case 8: modeDirectionCal(); break;
+    case 8: modeAutoCalibrateAll(); break;
     default: break;
   }
   motors::disable();

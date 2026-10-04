@@ -1,5 +1,8 @@
 #include "ui.h"
 
+#include "motors.h"
+#include "sonar.h"
+
 namespace {
 
 constexpr uint8_t EVENT_QUEUE = 8;
@@ -18,8 +21,33 @@ void pushEvent(ui::Button b) {
   ++g_evCount;
 }
 
+bool g_sonarArmed = false;
+bool g_sonarDown = false;
+
+bool sonarPressed() {
+  if (motors::enabled()) {
+    g_sonarArmed = false;
+    g_sonarDown = false;
+    return false;
+  }
+  const sonar::Reading f = sonar::read(sonar::FRONT);
+  if (!f.valid || sonar::ageMs(sonar::FRONT) > SONAR_FRESH_MS) return g_sonarDown;
+  const bool near = f.inRange && f.mm < SONAR_BUTTON_NEAR_MM;
+  const bool clear = !f.inRange || f.mm > 2.0f * SONAR_BUTTON_NEAR_MM;
+  if (clear) {
+    g_sonarArmed = true;
+    g_sonarDown = false;
+  } else if (near && g_sonarArmed) {
+    g_sonarDown = true;
+  } else if (!near && f.mm > SONAR_BUTTON_NEAR_MM + 20.0f) {
+    g_sonarDown = false;
+  }
+  return g_sonarDown;
+}
+
 void updateButton(uint32_t now) {
-  const bool raw = digitalRead(PIN_BUTTON) == LOW;
+  bool raw = digitalRead(PIN_BUTTON) == LOW;
+  if (USE_SONAR_BUTTON) raw = raw || sonarPressed();
   if (raw != g_rawDown) {
     g_rawDown = raw;
     g_rawChangeMs = now;

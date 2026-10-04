@@ -1,19 +1,25 @@
 # MMRC26 bring-up checklist
 
-Work through the steps in order. Re-flash after every `main/config.h` change:
-Arduino IDE, board **WEMOS LOLIN32 Lite**, esp32 core 3.x, Serial Monitor at
-**115200**.
+Flash with the Arduino IDE: board **WEMOS LOLIN32 Lite**, esp32 core 3.x.
+Keep Serial Monitor open at **115200**. With no buzzer and no LED, Serial is
+the only feedback, so keep `MMRC_DEBUG 1`.
 
-**Choosing a mode:** click the button N times; the robot beeps N back. For
-modes 2–6, a short press starts and a long press cancels; you then get 1 s to
-take your hand away. A short press during a test aborts it.
+## The "button" is the front sonar
 
-> **Chassis limit: match mode (7) is locked.** With the axle 27 mm from the
-> back, the nose is 99 mm ahead of it. A pivot then swings the front corners
-> out to about 103 mm, but a cell only gives 85–94 mm from its centre to a
-> wall. Mode 7 refuses with 3 low beeps. **Fix:** move the wheels/axle towards
-> the middle (axle about 60 mm from the back). Then update `ROBOT_NOSE_X_MM` /
-> `ROBOT_TAIL_X_MM` and mode 7 unlocks by itself. Modes 1–6 work now.
+There is no physical button. While the motors are off, the front sonar acts
+as one:
+
+| Action | What to do |
+|---|---|
+| **Click** | move a hand to under 5 cm in front of the robot, then away again. It only counts after the sensor has seen open space (over 10 cm) first, so a wall in front never counts as a press |
+| **Long press** | hold the hand there for 1.5 s |
+| **Choose a mode** | click N times; Serial prints `mode N` |
+| **Start a test** | one more click; you then get 1 s to step back |
+| **Cancel** | long press |
+| **Wipe the map** | long press in the main menu (`map wiped.`). Do this before every match |
+| **Start a match** | hold a hand under 8 cm for about 1 s, then remove it |
+| **Leave match mode** | hold for 3 s |
+| **Rescue after an abort** | put the robot in the start cell, then click |
 
 ## 1. Wiring
 
@@ -22,126 +28,82 @@ take your hand away. A short press during a test aborts it.
 | I2C SDA / SCL | 19 / 23 | MPU6050 on 3.3 V |
 | Left motor PWMA / AIN1 / AIN2 | 25 / 26 / 27 | |
 | Right motor PWMB / BIN1 / BIN2 | 32 / 33 / 13 | |
-| TB6612 STBY | 4 | LOW = motors off; 10k pull-down to GND recommended |
-| TRIG front / left / right | 16 / 17 / 18 | direct |
-| ECHO front / left / right | 35 / 36 / 39 | **each: ECHO–10k–GPIO–15k–GND** |
-| Left encoder channel A | 5 | **5 V encoder: A–10k–GPIO–15k–GND** |
-| Right encoder channel A | 22 | **5 V encoder: A–10k–GPIO–15k–GND** (the on-board LED flickers; harmless) |
-| Encoder VCC / GND | 5 V buck / GND | channel B unused |
-| Battery sense | 34 | **Bat+–20k–GPIO34–10k–GND** |
-| Button | 14 | to GND |
-| Buzzer | 15 | |
+| TB6612 STBY | 4 | LOW = motors off |
+| TRIG front / left / right | 16 / 17 / 18 | |
+| ECHO front / left / right | 35 / 36 / 39 | each: ECHO–10k–GPIO–15k–GND |
+| Encoder A left / right (5 V) | 5 / 22 | each: A–10k–GPIO–15k–GND; channel B unused |
+| Battery sense | 34 | Bat+–20k–GPIO34–10k–GND |
 
-**Never connect a 5 V signal straight to an ESP32 pin.** Power is 2S pack →
-switch → TB6612 VM, and buck 5 V → board 5V, sonars and encoders, with common
-GND everywhere.
+**Never connect a 5 V signal straight to an ESP32 pin.**
 
-**Pass:** at power-on, keep the robot still for 2 s. You should hear **4
-beeps** (3 sonars + IMU) and see `ready: click 1-7` in Serial.
+**Pass:** the robot waits 1 s at power-on (keep it still for about 3 s in
+total). Serial then shows all four parts `ok` and `ready: click 1-8`.
 
-**If it fails:** the error code is beeped as N long low beeps, repeated:
-- 1 / 2 / 3: front / left / right sonar. Check 5 V, TRIG and the echo divider.
-- 4: IMU. Check SDA/SCL and 3.3 V.
-- 5: battery below 6.6 V.
-- 6: motor fault.
-
-## 2. Mode 1: sensors
+## 2. Mode 1: sensors (1 click)
 
 **Do:**
-- Hold a hand at 50, 100 and 200 mm in front of each sonar.
-- Turn the robot **left** by hand.
-- Turn one wheel exactly **10 turns** by hand.
+- Hold a hand at 70, 100 and 200 mm in front of each sonar. Stay above 5 cm,
+  or the front sonar reads it as a click.
+- Turn the robot left by hand: `hdg` must rise. Mode 8 also fixes this
+  automatically.
 
-**Pass:**
-- Ranges within ±5 mm of the ruler.
-- `hdg` increases when turning left.
-- The encoder edge count of the turned wheel rises.
-- The battery voltage matches a multimeter.
+## 3. Mode 2: motors (wheels in the air, 2 clicks)
 
-**If it fails:**
+**Pass:** 5 phases. The driven wheel shows `encoders: ... ok`.
 
-| Symptom | Change in `config.h` |
-|---|---|
-| `hdg` decreases when turning left | `IMU_Z_SIGN = -1.0f` |
-| Battery differs from the multimeter | `BATT_CAL_FACTOR = multimeter / printed` |
-| Encoder edges per turn | `ENC_EDGES_PER_WHEEL_REV = (edges after 10 turns) / 10` |
-| Encoder count doesn't move | check the encoder 5 V, GND and the divider |
-| A sonar jumps | raise `SONAR_GAP_MS` (12 → 20) |
-| Buzzer silent or clicking | flip `BUZZER_ACTIVE` |
+A reversed motor shows `CHECK`. Mode 8 corrects it automatically.
 
-## 3. Mode 2: motors (wheels in the air)
+## 4. Mode 8: full auto-calibration (8 clicks)
 
-**Pass:** 5 phases (L fwd, L back, R fwd, R back, both fwd). Each prints
-`encoders: ... ok` for the driven wheel.
+**Do:** put the robot on open floor (it spins in place), facing a flat wall
+250–800 mm away, with room behind it.
 
-**If it fails:**
+**What it does,** each step checked before the next:
+1. finds which motor is wired backwards,
+2. finds the gyro sign,
+3. squares up on the wall,
+4. **forward:** mm per encoder edge, each wheel,
+5. **right:** clockwise gyro scale,
+6. **left:** counter-clockwise gyro scale,
+7. **back:** mm per encoder edge, each wheel, in reverse,
+8. **track width**,
+9. **motor model:** dead-band, speed table and lag, by spinning in place.
 
-| Symptom | Fix |
-|---|---|
-| Wheel spins the wrong way | flip `MOTOR_L_INVERT` / `MOTOR_R_INVERT` |
-| The wrong wheel moves | swap the motor connectors |
-| `CHECK` on a wheel that turned | that encoder's wiring or pin |
+**Pass:** Serial prints `saved: wiring ... track ...`. The values are stored
+and used on every boot.
 
-## 4. Mode 5: motor model
+**If it fails:** it names the failed step and saves nothing. Retry with a
+flatter, wider wall and more open floor.
 
-**Do:** put the robot in a straight corridor facing a wall 450–900 mm away.
+## 5. Modes 3, 6 and 4
 
-**Pass:** 5 rapid beeps (`saved to NVS`).
+| Mode | Pass | If not |
+|---|---|---|
+| 3: straight 5 cells | stops about 960 mm on, centred | weaving: lower `HEADING_KP_V_PER_DEG`; swinging across the corridor: lower `CENTER_KP_DEG_PER_MM` |
+| 6: one cell | `s_est` ends at about 192 | |
+| 4: four 90° pivots, **open floor** | 4 × `done`, error under 2° | overshoot: lower `PIVOT_KP_MM_S_PER_DEG` |
 
-## 5. Mode 3: straight 5 cells
+## 6. Mode 7: match (7 clicks)
 
-**Pass:** it stops 960 mm ± 15 mm along and stays centred.
+1. **Wipe the map:** long press in the menu.
+2. **Choose the mirror setting:** click to toggle (Serial shows normal or
+   MIRRORED), then long press to confirm.
+3. **Start:** hand-wave (under 8 cm for about 1 s, then remove).
 
-**If it fails:**
-
-| Symptom | Change |
-|---|---|
-| Distance off | `WHEEL_DIAMETER_MM *= ruler / encoder mm` (both printed) |
-| Weaves | lower `HEADING_KP_V_PER_DEG` |
-| Drifts to one side | raise `HEADING_KI_V_PER_DEG_S` |
-| Swings across the corridor | lower `CENTER_KP_DEG_PER_MM` |
-| Speed hunting | lower `SPEED_KP_V_PER_MM_S` |
-
-## 6. Mode 4: pivot 4 × 90° (open table only, never inside the maze)
-
-**Pass:** each turn shows `done`, error under 2°, and the robot ends facing
-where it started.
-
-**If it fails:**
-- Off by X° over 360°: `IMU_GYRO_SCALE *= 360 / (360 + X)`.
-- Overshoot or oscillation: lower `PIVOT_KP_MM_S_PER_DEG`.
-- Also measure `WHEEL_TRACK_MM` (wheel centre to wheel centre). The current
-  value, 105, is an estimate.
-
-## 7. Mode 6: one-cell step
-
-**Pass:** `s_est` ends at about 192 and the CSV shows a smooth speed curve.
-
-## 8. Mode 7: match (after the axle fix)
-
-**Do:**
-1. Wipe the map: hold the button at power-on until the long beep.
-2. Click 7. One beep = normal, two = mirrored; short press toggles, long
-   press confirms.
-3. Hand under 8 cm in front for half a second, then take it away.
-
-**Pass:** search → goal → return → speed runs, with no wall contact.
+Match speed is capped at T1/T2 (`MATCH_MAX_TIER = 1`). Raise it to 3 only
+after clean runs.
 
 ### Match day
-1. Set `MMRC_DEBUG 0`.
+1. Keep `MMRC_DEBUG 1`; Serial is the only feedback.
 2. Battery **above 7.8 V**.
 3. Wipe the map.
 4. Check the mirror setting.
 5. Ask the judges about `AUTO_RESTART`.
 
-### Sounds
-| Sound | Meaning |
-|---|---|
-| N short beeps | a number: working parts at boot, selected mode, mirror (1/2) |
-| 1 short high | OK, or start trigger seen |
-| 3 long low | refused / error (the code follows) |
-| 2 long low | aborted: waiting for rescue (place the robot at the start, short press, hand-wave) |
-| 1 very long | map wiped |
-| 5 rapid | calibration saved |
-| 2 rapid low | battery below 7.0 V |
-| 3 short | match time over |
+## Still to measure
+
+- **Axle position:** `ROBOT_NOSE_X_MM` / `ROBOT_TAIL_X_MM` assume the axle is
+  centred (63 / 63).
+- **Side sonar position:** assumed 45 mm ahead of the axle, 27 mm to each
+  side.
+- **Track width:** mode 8 measures it, so nothing to do.

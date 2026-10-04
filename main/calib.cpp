@@ -4,60 +4,90 @@
 
 #include "encoders.h"
 #include "imu.h"
+#include "motors.h"
 
 namespace {
 
-constexpr uint32_t DIRCAL_MAGIC = 0x44495231;
+constexpr uint32_t CALIB_MAGIC = 0x43414C32;
 
-struct Record {
-  uint32_t magic;
-  calib::Direction d;
-};
-
-calib::Direction g_dir = {1.0f, 1.0f, 1.0f, 1.0f};
+calib::Data g_data;
 bool g_calibrated = false;
 
-bool inRange(float v) { return v >= CAL8_SCALE_MIN && v <= CAL8_SCALE_MAX; }
+bool between(float v, float lo, float hi) { return v >= lo && v <= hi; }
 
-bool valid(const calib::Direction& d) {
-  return inRange(d.forward) && inRange(d.backward) && inRange(d.cw) && inRange(d.ccw);
+bool valid(const calib::Data& d) {
+  if (d.magic != CALIB_MAGIC || (d.gyroSign != 1.0f && d.gyroSign != -1.0f)) return false;
+  for (int w = 0; w < 2; ++w) {
+    for (int k = 0; k < 2; ++k) {
+      if (!between(d.mmPerEdge[w][k], ENC_MM_PER_EDGE * CAL_EDGE_MIN_FACTOR, ENC_MM_PER_EDGE * CAL_EDGE_MAX_FACTOR)) {
+        return false;
+      }
+    }
+  }
+  return between(d.cw, CAL8_SCALE_MIN, CAL8_SCALE_MAX) && between(d.ccw, CAL8_SCALE_MIN, CAL8_SCALE_MAX) &&
+         between(d.trackMm, CAL_TRACK_MIN_MM, CAL_TRACK_MAX_MM);
 }
 
-void apply() {
-  encoders::setDirectionScale(g_dir.forward, g_dir.backward);
-  imu::setDirectionScale(g_dir.cw, g_dir.ccw);
+void apply(const calib::Data& d) {
+  motors::setInvert(d.invertLeft != 0, d.invertRight != 0);
+  imu::setSign(d.gyroSign);
+  imu::setDirectionScale(d.cw, d.ccw);
+  encoders::setMmPerEdge(0, d.mmPerEdge[0][0], d.mmPerEdge[0][1]);
+  encoders::setMmPerEdge(1, d.mmPerEdge[1][0], d.mmPerEdge[1][1]);
 }
 
 }
 
 namespace calib {
 
-void begin() {
-  Preferences prefs;
-  Record r{};
-  g_calibrated = false;
-  if (prefs.begin(NVS_DIRCAL_NAMESPACE, true)) {
-    g_calibrated = prefs.getBytes("dir", &r, sizeof(r)) == sizeof(r) && r.magic == DIRCAL_MAGIC && valid(r.d);
-    prefs.end();
+Data defaults() {
+  Data d;
+  d.magic = CALIB_MAGIC;
+  d.invertLeft = 0;
+  d.invertRight = 0;
+  d.gyroSign = 1.0f;
+  for (int w = 0; w < 2; ++w) {
+    for (int k = 0; k < 2; ++k) d.mmPerEdge[w][k] = ENC_MM_PER_EDGE;
   }
-  if (g_calibrated) g_dir = r.d;
-  apply();
+  d.cw = 1.0f;
+  d.ccw = 1.0f;
+  d.trackMm = WHEEL_TRACK_MM;
+  return d;
 }
 
-const Direction& get() { return g_dir; }
-bool isCalibrated() { return g_calibrated; }
+void begin() {
+  g_data = defaults();
+  g_calibrated = false;
+  Data r{};
+  Preferences prefs;
+  if (prefs.begin(NVS_DIRCAL_NAMESPACE, true)) {
+    g_calibrated = prefs.getBytes("all", &r, sizeof(r)) == sizeof(r) && valid(r);
+    prefs.end();
+  }
+  if (g_calibrated) g_data = r;
+  apply(g_data);
+}
 
-bool save(const Direction& d) {
-  if (!valid(d)) return false;
-  Record r{DIRCAL_MAGIC, d};
+const Data& get() { return g_data; }
+bool isCalibrated() { return g_calibrated; }
+float trackMm() { return g_data.trackMm; }
+
+void applyWithoutSaving(const Data& d) {
+  g_data = d;
+  apply(d);
+}
+
+bool save(const Data& d) {
+  Data c = d;
+  c.magic = CALIB_MAGIC;
+  if (!valid(c)) return false;
   Preferences prefs;
   if (!prefs.begin(NVS_DIRCAL_NAMESPACE, false)) return false;
-  const bool ok = prefs.putBytes("dir", &r, sizeof(r)) == sizeof(r);
+  const bool ok = prefs.putBytes("all", &c, sizeof(c)) == sizeof(c);
   prefs.end();
   if (ok) {
-    g_dir = d;
     g_calibrated = true;
-    apply();
+    applyWithoutSaving(c);
   }
   return ok;
 }

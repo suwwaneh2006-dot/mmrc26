@@ -54,6 +54,7 @@ bool  idle();
 
 void  fault(Fault f);
 Fault faultCode();
+void  setInvert(bool left, bool right);
 void  clearFault();
 
 const VelocityModel& model();

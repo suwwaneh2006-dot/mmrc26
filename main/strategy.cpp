@@ -460,7 +460,7 @@ Trigger waitTrigger() {
   while (true) {
     sched::service();
     const ui::Button b = ui::event();
-    if (b == ui::Button::SHORT) return Trigger::RESCUE;
+    if (b == ui::Button::SHORT && !USE_SONAR_BUTTON) return Trigger::RESCUE;
     if (b == ui::Button::LONG) return Trigger::EXIT;
     const sonar::Reading f = sonar::read(sonar::FRONT);
     const bool near = f.inRange && f.mm < TRIGGER_NEAR_MM && sonar::ageMs(sonar::FRONT) < SONAR_FRESH_MS;
@@ -479,6 +479,7 @@ Trigger waitTrigger() {
       ui::soundOk();
       ui::led(ui::Led::BLINK_FAST);
       sched::waitMs(TRIGGER_DELAY_MS);
+      ui::clearEvents();
       return Trigger::GO;
     }
   }

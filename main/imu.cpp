@@ -19,6 +19,7 @@ float    g_bias      = 0.0f;
 float    g_rate      = 0.0f;
 float    g_heading   = 0.0f;
 float    g_cwScale   = 1.0f;
+float    g_sign      = 1.0f;
 float    g_ccwScale  = 1.0f;
 
 float    g_stillSum   = 0.0f;
@@ -33,7 +34,7 @@ bool readRawRate(float& out) {
   const uint8_t hi = static_cast<uint8_t>(Wire.read());
   const uint8_t lo = static_cast<uint8_t>(Wire.read());
   const int16_t raw = static_cast<int16_t>((static_cast<uint16_t>(hi) << 8) | lo);
-  out = IMU_Z_SIGN * IMU_GYRO_SCALE * (raw / IMU_GYRO_LSB_PER_DPS);
+  out = g_sign * IMU_Z_SIGN * IMU_GYRO_SCALE * (raw / IMU_GYRO_LSB_PER_DPS);
   return true;
 }
 
@@ -110,6 +111,10 @@ void update(float dt_s, bool motorsIdle) {
 
 bool  ok()          { return g_ok; }
 float rateDps()     { return g_rate; }
+void  setSign(float sign) {
+  if (sign != g_sign) g_bias = -g_bias;
+  g_sign = sign;
+}
 void  setDirectionScale(float cw, float ccw) {
   g_cwScale = cw;
   g_ccwScale = ccw;

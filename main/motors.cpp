@@ -217,6 +217,11 @@ void fault(Fault f) {
 
 Fault faultCode() { return g_fault; }
 
+void setInvert(bool left, bool right) {
+  g_left.invert = MOTOR_L_INVERT != left;
+  g_right.invert = MOTOR_R_INVERT != right;
+}
+
 void clearFault() {
   disable();
   g_fault = Fault::NONE;

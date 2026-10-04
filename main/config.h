@@ -85,8 +85,8 @@ constexpr float ROBOT_WHEEL_HALF_LENGTH_MM = 17.0f;
 constexpr float ROBOT_HALF_LENGTH_MM = ROBOT_NOSE_X_MM > ROBOT_TAIL_X_MM ? ROBOT_NOSE_X_MM : ROBOT_TAIL_X_MM;
 
 constexpr float SONAR_F_X_MM = 63.0f, SONAR_F_Y_MM = 0.0f,   SONAR_F_ANGLE_DEG = 0.0f;
-constexpr float SONAR_L_X_MM = 20.0f, SONAR_L_Y_MM = 30.0f,  SONAR_L_ANGLE_DEG = 90.0f;
-constexpr float SONAR_R_X_MM = 20.0f, SONAR_R_Y_MM = -30.0f, SONAR_R_ANGLE_DEG = -90.0f;
+constexpr float SONAR_L_X_MM = 45.0f, SONAR_L_Y_MM = 27.0f,  SONAR_L_ANGLE_DEG = 90.0f;
+constexpr float SONAR_R_X_MM = 45.0f, SONAR_R_Y_MM = -27.0f, SONAR_R_ANGLE_DEG = -90.0f;
 
 constexpr uint32_t CONTROL_TICK_US          = 1000;
 constexpr float    CONTROL_TICK_S           = CONTROL_TICK_US * 1e-6f;
@@ -207,6 +207,9 @@ constexpr float    BATT_BLOCK_FAST_V      = 6.8f;
 constexpr float    BATT_REFUSE_ARM_V      = 6.6f;
 constexpr float    BATT_CUTOFF_LOAD_V     = 6.4f;
 
+constexpr uint32_t BOOT_DELAY_MS        = 1000;
+constexpr bool     USE_SONAR_BUTTON     = true;
+constexpr float    SONAR_BUTTON_NEAR_MM = 50.0f;
 constexpr uint32_t BUTTON_DEBOUNCE_MS   = 25;
 constexpr uint32_t BUTTON_LONG_MS       = 1500;
 constexpr uint32_t CLICK_GAP_MS         = 800;
@@ -431,6 +434,20 @@ constexpr int      CAL8_MIN_FIT_SAMPLES = 7;
 constexpr float    CAL8_SCALE_MIN       = 0.8f;
 constexpr float    CAL8_SCALE_MAX       = 1.25f;
 constexpr SpeedTier CAL8_TIER           = {150.0f, MAX_ACCEL_MM_S2, 60.0f};
+
+constexpr float    CAL_EDGE_MIN_FACTOR  = 0.3f;
+constexpr float    CAL_EDGE_MAX_FACTOR  = 3.0f;
+constexpr float    CAL_TRACK_MIN_MM     = 50.0f;
+constexpr float    CAL_TRACK_MAX_MM     = 200.0f;
+constexpr float    CAL_PROBE_V          = 2.0f;
+constexpr uint32_t CAL_PROBE_MS         = 250;
+constexpr float    CAL_PROBE_MOVE_MM    = 10.0f;
+constexpr float    CAL_PROBE_SPIN_DEG   = 20.0f;
+constexpr float    CAL_FIND_WALL_DEG    = 40.0f;
+constexpr int      CAL_SPIN_STEPS       = 7;
+constexpr float    CAL_SPIN_V[CAL_SPIN_STEPS] = {1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f, 4.0f};
+constexpr uint32_t CAL_SPIN_HOLD_MS     = 700;
+constexpr uint32_t CAL_SPIN_MEASURE_MS  = 300;
 
 #define NVS_DIRCAL_NAMESPACE "mmrc_dir"
 #define NVS_MAP_NAMESPACE "mmrc_map"

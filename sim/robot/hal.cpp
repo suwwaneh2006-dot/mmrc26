@@ -72,6 +72,13 @@ int g_startX = 0;
 
 void addRect(float x0, float x1, float y0, float y1) { g_rects.push_back(Rect{x0, x1, y0, y1}); }
 
+bool postIsFree(int i, int j) {
+  const int w = g_maze.width, h = g_maze.height;
+  if (i == 0 || j == 0 || i == w || j == h) return false;
+  return !g_maze.wall[i - 1][j - 1][mm::EAST] && !g_maze.wall[i - 1][j][mm::EAST] && !g_maze.wall[i - 1][j - 1][mm::NORTH] &&
+         !g_maze.wall[i][j - 1][mm::NORTH];
+}
+
 void buildGeometry() {
   std::uniform_real_distribution<float> inner(CELL_INNER_MM * (1.0f - g_p.cellTolerance),
                                               CELL_INNER_MM * (1.0f + g_p.cellTolerance));
@@ -82,6 +89,7 @@ void buildGeometry() {
   g_rects.clear();
   for (int i = 0; i <= g_maze.width; ++i) {
     for (int j = 0; j <= g_maze.height; ++j) {
+      if (g_p.openFloor && postIsFree(i, j)) continue;
       addRect(g_lx[i] - HALF_WALL, g_lx[i] + HALF_WALL, g_ly[j] - HALF_WALL, g_ly[j] + HALF_WALL);
     }
   }
@@ -246,7 +254,7 @@ void encoderStep(float leftMm, float rightMm) {
 
 void physicsStep(float dt) {
   float tauL, tauR;
-  const float tl = wheelTarget(PIN_MOTOR_L_PWM, PIN_MOTOR_L_IN1, PIN_MOTOR_L_IN2, 1.0f, tauL);
+  const float tl = wheelTarget(PIN_MOTOR_L_PWM, PIN_MOTOR_L_IN1, PIN_MOTOR_L_IN2, g_p.invertLeftMotor ? -1.0f : 1.0f, tauL);
   const float tr = wheelTarget(PIN_MOTOR_R_PWM, PIN_MOTOR_R_IN1, PIN_MOTOR_R_IN2, g_p.rightWheelGain, tauR);
   g_r.vl += (tl - g_r.vl) * fminf(dt / tauL, 1.0f);
   g_r.vr += (tr - g_r.vr) * fminf(dt / tauR, 1.0f);
@@ -357,7 +365,7 @@ int      g_rxLen = 0, g_rxPos = 0;
 
 uint8_t mpuRegister(uint8_t reg) {
   static const float lsb[4] = {131.0f, 65.5f, 32.8f, 16.4f};
-  const float rate = g_r.omegaDps + g_gyroBias + gauss(g_p.gyroNoiseDps);
+  const float rate = (g_p.gyroFlipped ? -1.0f : 1.0f) * (g_r.omegaDps + g_gyroBias + gauss(g_p.gyroNoiseDps));
   float counts = rate * lsb[(g_gyroConfig >> 3) & 3];
   counts = fmaxf(fminf(counts, 32767.0f), -32768.0f);
   const int16_t gz = static_cast<int16_t>(counts);

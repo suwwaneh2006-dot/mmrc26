@@ -1,5 +1,6 @@
 #include "motion.h"
 
+#include "calib.h"
 #include "encoders.h"
 #include "estimator.h"
 #include "imu.h"
@@ -234,7 +235,7 @@ void tickRun(float dt) {
 void tickPivot(float dt) {
   g_turn.step(dt);
   const VelocityModel& m = motors::model();
-  const float halfTrack = WHEEL_TRACK_MM * 0.5f;
+  const float halfTrack = calib::trackMm() * 0.5f;
   const float refDeg  = g_pivotStart + g_turnSign * g_turn.pos;
   const float refRate = g_turnSign * g_turn.vel;
   const float err     = refDeg - imu::headingDeg();
