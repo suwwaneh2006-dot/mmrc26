@@ -95,11 +95,13 @@ void buzzer(bool on, bool low) {
 #if MMRC_DEBUG
 char     g_cmd[8];
 uint8_t  g_cmdLen = 0;
+uint32_t g_cmdLastMs = 0;
 uint8_t  g_serialMode = 0;
 bool     g_modeActive = false;
 
 void handleCommand() {
   g_cmd[g_cmdLen] = '\0';
+  DBG_PRINTF("> %s\n", g_cmd);
   if (g_cmdLen == 1 && g_cmd[0] == 's') {
     motors::fault(Fault::USER_ABORT);
     if (g_modeActive) pushEvent(ui::Button::SHORT);
@@ -116,9 +118,14 @@ void pollSerial() {
     if (c == '\n' || c == '\r') {
       if (g_cmdLen > 0) handleCommand();
       g_cmdLen = 0;
-    } else if (g_cmdLen < sizeof(g_cmd) - 1) {
+    } else if (c != ' ' && g_cmdLen < sizeof(g_cmd) - 1) {
       g_cmd[g_cmdLen++] = static_cast<char>(c);
+      g_cmdLastMs = millis();
     }
+  }
+  if (g_cmdLen > 0 && millis() - g_cmdLastMs > SERIAL_CMD_IDLE_MS) {
+    handleCommand();
+    g_cmdLen = 0;
   }
 }
 #endif
