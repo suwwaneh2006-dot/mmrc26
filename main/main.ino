@@ -1,6 +1,7 @@
 #include "config.h"
 
 #include "battery.h"
+#include "calib.h"
 #include "encoders.h"
 #include "estimator.h"
 #include "imu.h"
@@ -27,6 +28,7 @@ void setup() {
 
   sonar::begin();
   encoders::begin();
+  calib::begin();
   estimator::begin();
   sched::begin();
   motion::begin();

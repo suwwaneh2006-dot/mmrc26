@@ -18,6 +18,8 @@ uint32_t g_errors    = 0;
 float    g_bias      = 0.0f;
 float    g_rate      = 0.0f;
 float    g_heading   = 0.0f;
+float    g_cwScale   = 1.0f;
+float    g_ccwScale  = 1.0f;
 
 float    g_stillSum   = 0.0f;
 uint32_t g_stillCount = 0;
@@ -88,7 +90,8 @@ void update(float dt_s, bool motorsIdle) {
     return;
   }
   g_failRun = 0;
-  g_rate = raw - g_bias;
+  const float unscaled = raw - g_bias;
+  g_rate = unscaled * (unscaled >= 0.0f ? g_ccwScale : g_cwScale);
   g_heading += g_rate * dt_s;
 
   if (motorsIdle && fabsf(g_rate) < IMU_STILL_RATE_DPS) {
@@ -107,6 +110,10 @@ void update(float dt_s, bool motorsIdle) {
 
 bool  ok()          { return g_ok; }
 float rateDps()     { return g_rate; }
+void  setDirectionScale(float cw, float ccw) {
+  g_cwScale = cw;
+  g_ccwScale = ccw;
+}
 float headingDeg()  { return g_heading; }
 void  setHeading(float deg) { g_heading = deg; }
 float biasDps()     { return g_bias; }

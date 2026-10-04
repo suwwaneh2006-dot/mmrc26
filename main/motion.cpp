@@ -183,7 +183,14 @@ bool stuck(bool useFrontRange) {
 void tickRun(float dt) {
   const VelocityModel& m = motors::model();
   const bool forward = g_runSign > 0.0f;
-  const float remaining = g_runSign * (g_runTarget - estimator::s());
+  float remaining = g_runSign * (g_runTarget - estimator::s());
+  if (forward) {
+    const sonar::Reading fr = sonar::read(sonar::FRONT);
+    if (fr.inRange && sonar::ageMs(sonar::FRONT) <= SONAR_FRESH_MS) {
+      const float toClear = fr.mm - FRONT_STOP_READING_MM - fmaxf(estimator::v(), 0.0f) * SONAR_LATENCY_S;
+      if (toClear < remaining) remaining = fmaxf(toClear, 0.0f);
+    }
+  }
 
   float vmax = g_tier.speed_mm_s;
   if (g_speedCap > 0.0f) vmax = fminf(vmax, g_speedCap);
@@ -271,7 +278,7 @@ void tickAlign() {
     enterStopping(Result::DONE);
     return;
   }
-  const float err = f.mm - FRONT_CENTRE_READING_MM;
+  const float err = f.mm - FRONT_STOP_READING_MM;
   const float v = clampf(ALIGN_KP_PER_S * err, -ALIGN_MAX_SPEED_MM_S, ALIGN_MAX_SPEED_MM_S);
   const float base = fabsf(err) < ALIGN_TOLERANCE_MM ? 0.0f : motors::model().voltsFor(v);
   const float corr = headingCorrection(g_headingTarget, fabsf(base) > 0.0f ? CONTROL_TICK_S : 0.0f);

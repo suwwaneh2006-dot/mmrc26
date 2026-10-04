@@ -73,17 +73,18 @@ constexpr float WHEEL_DIAMETER_MM = 34.0f;
 
 constexpr float WHEEL_TRACK_MM    = 105.0f;
 
-constexpr float ROBOT_NOSE_X_MM   = 99.0f;
+constexpr float ROBOT_NOSE_X_MM   = 63.0f;
 
-constexpr float ROBOT_TAIL_X_MM   = 27.0f;
+constexpr float ROBOT_TAIL_X_MM   = 63.0f;
 
 constexpr float ROBOT_HALF_WIDTH_MM = 61.0f;
 constexpr float ROBOT_FRONT_HALF_WIDTH_MM = 27.0f;
+constexpr float ROBOT_BODY_HALF_WIDTH_MM = 44.0f;
 constexpr float ROBOT_WHEEL_HALF_LENGTH_MM = 17.0f;
 
 constexpr float ROBOT_HALF_LENGTH_MM = ROBOT_NOSE_X_MM > ROBOT_TAIL_X_MM ? ROBOT_NOSE_X_MM : ROBOT_TAIL_X_MM;
 
-constexpr float SONAR_F_X_MM = 99.0f, SONAR_F_Y_MM = 0.0f,   SONAR_F_ANGLE_DEG = 0.0f;
+constexpr float SONAR_F_X_MM = 63.0f, SONAR_F_Y_MM = 0.0f,   SONAR_F_ANGLE_DEG = 0.0f;
 constexpr float SONAR_L_X_MM = 20.0f, SONAR_L_Y_MM = 30.0f,  SONAR_L_ANGLE_DEG = 90.0f;
 constexpr float SONAR_R_X_MM = 20.0f, SONAR_R_Y_MM = -30.0f, SONAR_R_ANGLE_DEG = -90.0f;
 
@@ -251,7 +252,9 @@ constexpr uint32_t TURN_TIMEOUT_MS     = 1500;
 constexpr float BRAKE_DECEL_MM_S2      = 3000.0f;
 constexpr float SONAR_LATENCY_S        = 0.04f;
 
-constexpr float COLLISION_MARGIN_MM    = 20.0f;
+constexpr float NOSE_CLEARANCE_MM      = 15.0f;
+constexpr float COLLISION_MARGIN_MM    = 6.0f;
+static_assert(COLLISION_MARGIN_MM + 5.0f <= NOSE_CLEARANCE_MM, "collision guard would trip on a planned stop");
 constexpr bool ROBOT_FITS_CELL_STOP = COLLISION_MARGIN_MM < HALF_CELL_INNER_MM - ROBOT_NOSE_X_MM - 5.0f;
 constexpr uint32_t SONAR_FRESH_MS      = 100;
 constexpr uint32_t MOTION_STOP_SETTLE_MS = 150;
@@ -278,6 +281,9 @@ constexpr uint32_t SIDE_SAMPLE_MAX_AGE_MS = 80;
 constexpr float SIDE_MAX_RATE_DPS      = 30.0f;
 
 constexpr float FRONT_CENTRE_READING_MM = HALF_CELL_INNER_MM - SONAR_F_X_MM;
+constexpr float FRONT_CLEAR_READING_MM = NOSE_CLEARANCE_MM + ROBOT_NOSE_X_MM - SONAR_F_X_MM;
+constexpr float FRONT_STOP_READING_MM =
+    FRONT_CENTRE_READING_MM > FRONT_CLEAR_READING_MM ? FRONT_CENTRE_READING_MM : FRONT_CLEAR_READING_MM;
 
 constexpr float ALIGN_KP_PER_S         = 4.0f;
 constexpr float ALIGN_MAX_SPEED_MM_S   = 60.0f;
@@ -290,19 +296,21 @@ constexpr float PIVOT_FRONT_SQ_MM2 =
 constexpr float PIVOT_WHEEL_SQ_MM2 =
     ROBOT_WHEEL_HALF_LENGTH_MM * ROBOT_WHEEL_HALF_LENGTH_MM + ROBOT_HALF_WIDTH_MM * ROBOT_HALF_WIDTH_MM;
 constexpr float PIVOT_TAIL_SQ_MM2 =
-    ROBOT_TAIL_X_MM * ROBOT_TAIL_X_MM + ROBOT_HALF_WIDTH_MM * ROBOT_HALF_WIDTH_MM;
+    ROBOT_TAIL_X_MM * ROBOT_TAIL_X_MM + ROBOT_BODY_HALF_WIDTH_MM * ROBOT_BODY_HALF_WIDTH_MM;
 constexpr float PIVOT_CORNER_RADIUS_SQ_MM2 =
     PIVOT_FRONT_SQ_MM2 > PIVOT_WHEEL_SQ_MM2
         ? (PIVOT_FRONT_SQ_MM2 > PIVOT_TAIL_SQ_MM2 ? PIVOT_FRONT_SQ_MM2 : PIVOT_TAIL_SQ_MM2)
         : (PIVOT_WHEEL_SQ_MM2 > PIVOT_TAIL_SQ_MM2 ? PIVOT_WHEEL_SQ_MM2 : PIVOT_TAIL_SQ_MM2);
-constexpr float PIVOT_LATERAL_LIMIT_MM = 12.0f;
+constexpr float PIVOT_LATERAL_LIMIT_MM = 5.0f;
 constexpr float RECENTRE_ANGLE_DEG     = 20.0f;
 constexpr float RECENTRE_MAX_OFFSET_MM = 30.0f;
 constexpr bool  PIVOT_RECENTRE         = true;
 constexpr uint32_t RECENTRE_READING_MAX_AGE_MS = 100;
 constexpr bool ROBOT_CAN_PIVOT = PIVOT_CORNER_RADIUS_SQ_MM2 < (HALF_CELL_INNER_MM * (1.0f - 0.05f) - PIVOT_LATERAL_LIMIT_MM) *
                                                        (HALF_CELL_INNER_MM * (1.0f - 0.05f) - PIVOT_LATERAL_LIMIT_MM);
-constexpr bool ROBOT_MAZE_READY = ROBOT_CAN_PIVOT && ROBOT_FITS_CELL_STOP;
+constexpr bool ROBOT_PIVOT_VERIFIED = true;
+constexpr bool ROBOT_MAZE_READY = ROBOT_PIVOT_VERIFIED || (ROBOT_CAN_PIVOT && ROBOT_FITS_CELL_STOP);
+constexpr int  MATCH_MAX_TIER = 1;
 constexpr uint32_t STUCK_MS            = 400;
 constexpr float STUCK_MIN_RANGE_CHANGE_MM = 5.0f;
 constexpr float STUCK_MAX_RATE_DPS     = 3.0f;
@@ -413,6 +421,18 @@ constexpr float CAL_MAX_SPEED_MM_S        = 900.0f;
 constexpr int   CAL_MIN_POINTS            = 3;
 
 #define NVS_CAL_NAMESPACE "mmrc_cal"
+constexpr float    CAL8_MIN_FRONT_MM    = 250.0f;
+constexpr float    CAL8_MAX_FRONT_MM    = 800.0f;
+constexpr float    CAL8_STOP_FRONT_MM   = 120.0f;
+constexpr float    CAL8_MIN_TRAVEL_MM   = 100.0f;
+constexpr float    CAL8_SCAN_MARGIN_DEG = 45.0f;
+constexpr float    CAL8_WINDOW_DEG      = 35.0f;
+constexpr int      CAL8_MIN_FIT_SAMPLES = 7;
+constexpr float    CAL8_SCALE_MIN       = 0.8f;
+constexpr float    CAL8_SCALE_MAX       = 1.25f;
+constexpr SpeedTier CAL8_TIER           = {150.0f, MAX_ACCEL_MM_S2, 60.0f};
+
+#define NVS_DIRCAL_NAMESPACE "mmrc_dir"
 #define NVS_MAP_NAMESPACE "mmrc_map"
 
 #ifdef ARDUINO

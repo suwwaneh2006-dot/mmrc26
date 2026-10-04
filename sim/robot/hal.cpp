@@ -28,8 +28,12 @@ constexpr float    WALL = 12.0f;
 constexpr float    HALF_WALL = 6.0f;
 
 constexpr float    BODY_FRONT = ROBOT_NOSE_X_MM;
-constexpr float    BODY_BACK = 45.0f;
-constexpr float    BODY_HALF_W = 42.0f;
+constexpr float    BODY_BACK = ROBOT_TAIL_X_MM;
+constexpr float    BODY_HALF_W = ROBOT_BODY_HALF_WIDTH_MM;
+constexpr float    FRONT_HALF_W = ROBOT_FRONT_HALF_WIDTH_MM;
+constexpr float    WHEEL_HALF_W = ROBOT_HALF_WIDTH_MM;
+constexpr float    WHEEL_HALF_L = ROBOT_WHEEL_HALF_LENGTH_MM;
+constexpr float    TAPER_X = BODY_FRONT - 33.0f;
 constexpr float    SOUND_MM_PER_US = 0.3434f;
 constexpr uint32_t ECHO_RISE_DELAY_US = 450;
 
@@ -122,7 +126,7 @@ struct Robot {
   bool  crashedNow;
 };
 Robot g_r;
-world::Stats g_stats = {0, 0.0, 1e9f, 0, 0.0, 0.0f, 0.0, 0.0f, 0.0f};
+world::Stats g_stats = {0, 0, 0.0, 1e9f, 0, 0.0, 0.0f, 0.0, 0.0f, 0.0f};
 bool  g_wasMoving = false;
 float g_gyroBias = 0.0f;
 bool  g_hand = false;
@@ -173,9 +177,11 @@ float pointRectDist(float px, float py, const Rect& r) {
 
 void checkCollision() {
   const float c = cosf(g_r.th), s = sinf(g_r.th);
-  const float pts[8][2] = {{BODY_FRONT, BODY_HALF_W}, {BODY_FRONT, -BODY_HALF_W}, {-BODY_BACK, BODY_HALF_W},
-                           {-BODY_BACK, -BODY_HALF_W}, {BODY_FRONT, 0}, {-BODY_BACK, 0}, {0, BODY_HALF_W},
-                           {0, -BODY_HALF_W}};
+  const float pts[14][2] = {{BODY_FRONT, FRONT_HALF_W},  {BODY_FRONT, -FRONT_HALF_W}, {TAPER_X, BODY_HALF_W},
+                            {TAPER_X, -BODY_HALF_W},     {-BODY_BACK, BODY_HALF_W},   {-BODY_BACK, -BODY_HALF_W},
+                            {WHEEL_HALF_L, WHEEL_HALF_W}, {WHEEL_HALF_L, -WHEEL_HALF_W}, {-WHEEL_HALF_L, WHEEL_HALF_W},
+                            {-WHEEL_HALF_L, -WHEEL_HALF_W}, {BODY_FRONT, 0},            {-BODY_BACK, 0},
+                            {0, WHEEL_HALF_W},            {0, -WHEEL_HALF_W}};
   const std::vector<int>& near = g_bucket[static_cast<size_t>(cellIndexAt(g_r.x, g_r.y))];
   bool hit = false;
   float minGap = 1e9f;
@@ -191,6 +197,7 @@ void checkCollision() {
   if (fabsf(g_r.vl) + fabsf(g_r.vr) > 1.0f) g_stats.minWallClearanceMm = fminf(g_stats.minWallClearanceMm, minGap);
   if (hit && !g_r.crashedNow) {
     ++g_stats.crashes;
+    if (fabsf(0.5f * (g_r.vl + g_r.vr)) < 30.0f && fabsf(g_r.omegaDps) > 20.0f) ++g_stats.pivotCrashes;
     Serial.printf("SIM CRASH at x=%.0f y=%.0f heading=%.1f deg\n", g_r.x, g_r.y, g_r.th / DEG);
   }
   g_r.crashedNow = hit;

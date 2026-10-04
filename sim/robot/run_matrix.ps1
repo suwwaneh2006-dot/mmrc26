@@ -14,7 +14,7 @@ foreach ($m in $mazes) {
     $rows += [pscustomobject]@{
       maze = $m.BaseName.Replace('mmrc26-island-10x10-', ''); mirror = $cfg.mir; motor = $cfg.err
       runs = & $g 'runs to goal\s+(\d+)'; rets = & $g 'returns\s+(\d+)'; aborts = & $g 'aborts\s+(\d+)'
-      crash = & $g 'CRASHES\s+(\d+)'; clear = & $g 'min clearance\s+([\d\.]+)'
+      crash = & $g 'CRASHES\s+(\d+)'; pivot = & $g 'pivot crashes\s+(\d+)'; clear = & $g 'min clearance\s+([\d\.]+)'
       alongMax = & $g 'max ([\d\.]+) mm, lateral'; wrong = & $g '(\d+) WRONG'; best = & $g 'best time\s+([\d\.]+)'
       score = & $g 'score = .* = (\d+)'; verdict = & $g 'VERDICT\s+(\w+)'
     }
@@ -23,3 +23,4 @@ foreach ($m in $mazes) {
 $rows | Format-Table -AutoSize | Out-String -Width 200
 "PASS: " + ($rows | Where-Object verdict -eq 'PASS').Count + " / " + $rows.Count
 "crashes total: " + (($rows | ForEach-Object { [int]$_.crash }) | Measure-Object -Sum).Sum
+"pivot crashes total: " + (($rows | ForEach-Object { [int]$_.pivot }) | Measure-Object -Sum).Sum

@@ -3,6 +3,7 @@
 #include <Preferences.h>
 
 #include "battery.h"
+#include "calib.h"
 #include "encoders.h"
 #include "estimator.h"
 #include "imu.h"
@@ -15,7 +16,7 @@
 
 namespace {
 
-constexpr uint8_t MODE_COUNT = 7;
+constexpr uint8_t MODE_COUNT = 8;
 constexpr float   MOTOR_TEST_V = 2.0f;
 constexpr uint32_t MOTOR_TEST_PHASE_MS = 1500;
 constexpr uint32_t BATT_WARN_PERIOD_MS = 10000;
@@ -541,6 +542,151 @@ void modeStepTest() {
   else ui::soundAbort();
 }
 
+float encoderTravel() { return 0.5f * (encoders::leftMm() + encoders::rightMm()); }
+
+constexpr int CAL8_MAX_SAMPLES = 900;
+float g_scanHeading[CAL8_MAX_SAMPLES];
+float g_scanRange[CAL8_MAX_SAMPLES];
+
+bool fitMinimum(int n, float centre, float& minHeading) {
+  double s[5] = {0, 0, 0, 0, 0}, t[3] = {0, 0, 0};
+  int used = 0;
+  for (int i = 0; i < n; ++i) {
+    const double x = g_scanHeading[i] - centre;
+    if (fabs(x) > CAL8_WINDOW_DEG) continue;
+    const double y = g_scanRange[i];
+    double p = 1.0;
+    for (int k = 0; k < 5; ++k) {
+      s[k] += p;
+      if (k < 3) t[k] += p * y;
+      p *= x;
+    }
+    ++used;
+  }
+  if (used < CAL8_MIN_FIT_SAMPLES) return false;
+  const double a[3][3] = {{s[0], s[1], s[2]}, {s[1], s[2], s[3]}, {s[2], s[3], s[4]}};
+  const double det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+                     a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+                     a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+  if (fabs(det) < 1e-12) return false;
+  const double db = a[0][0] * (t[1] * a[2][2] - a[1][2] * t[2]) - t[0] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+                    a[0][2] * (a[1][0] * t[2] - t[1] * a[2][0]);
+  const double dc = a[0][0] * (a[1][1] * t[2] - t[1] * a[2][1]) - a[0][1] * (a[1][0] * t[2] - t[1] * a[2][0]) +
+                    t[0] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+  const double b = db / det, c = dc / det;
+  if (c <= 0.0) return false;
+  const double vertex = -b / (2.0 * c);
+  if (fabs(vertex) > CAL8_WINDOW_DEG) return false;
+  minHeading = static_cast<float>(centre + vertex);
+  return true;
+}
+
+bool scanTurn(float dir, float& measuredDeg) {
+  const float start = motion::headingTargetDeg();
+  motion::pivot(-dir * CAL8_SCAN_MARGIN_DEG, CAL8_TIER);
+  if (waitMotion() != motion::Result::DONE) return false;
+  int n = 0;
+  uint32_t seq = sonar::read(sonar::FRONT).seq;
+  motion::pivot(dir * (360.0f + 2.0f * CAL8_SCAN_MARGIN_DEG), CAL8_TIER);
+  ui::clearEvents();
+  while (motion::busy()) {
+    sched::service();
+    if (ui::event() == ui::Button::SHORT) motion::stop();
+    const sonar::Reading r = sonar::read(sonar::FRONT);
+    if (r.seq != seq) {
+      seq = r.seq;
+      if (r.rawMm <= FRONT_MAX_MM && n < CAL8_MAX_SAMPLES) {
+        g_scanHeading[n] = imu::headingDeg();
+        g_scanRange[n] = r.rawMm;
+        ++n;
+      }
+    }
+  }
+  if (motion::result() != motion::Result::DONE) return false;
+  motion::pivot(-dir * CAL8_SCAN_MARGIN_DEG, CAL8_TIER);
+  if (waitMotion() != motion::Result::DONE) return false;
+  float m1, m2;
+  if (!fitMinimum(n, start, m1) || !fitMinimum(n, start + dir * 360.0f, m2)) {
+    DBG_PRINTF("   no clear wall minimum in the scan (%d samples)\n", n);
+    return false;
+  }
+  measuredDeg = fabsf(m2 - m1);
+  return measuredDeg > 300.0f && measuredDeg < 420.0f;
+}
+
+void modeDirectionCal() {
+  DBG_PRINTF("\n== MODE 8: direction calibration: forward, right, left, back ==\n");
+  DBG_PRINTF("Face a flat wall %.0f-%.0f mm ahead, open space around, room behind.\n", CAL8_MIN_FRONT_MM,
+             CAL8_MAX_FRONT_MM);
+  const float f0 = settledFrontMm();
+  if (f0 < CAL8_MIN_FRONT_MM || f0 > CAL8_MAX_FRONT_MM) {
+    DBG_PRINTF("front range %.0f mm outside the window - refused.\n", f0);
+    ui::soundError();
+    return;
+  }
+  if (!armMotors()) return;
+  sonar::setFrontOnly(true);
+  calib::Direction d = calib::get();
+  bool ok = true;
+
+  const float e0 = encoderTravel();
+  motion::straight(f0 - CAL8_STOP_FRONT_MM, CAL8_TIER);
+  ok = waitMotion() == motion::Result::DONE;
+  const float f1 = settledFrontMm();
+  const float fwdTrue = f0 - f1, fwdEnc = encoderTravel() - e0;
+  if (ok && f1 > 0.0f && fwdEnc > CAL8_MIN_TRAVEL_MM && fwdTrue > CAL8_MIN_TRAVEL_MM) {
+    d.forward *= fwdTrue / fwdEnc;
+    DBG_PRINTF("forward : sonar %.1f mm, encoders %.1f mm -> scale %.4f\n", fwdTrue, fwdEnc, d.forward);
+  } else {
+    ok = false;
+    DBG_PRINTF("forward : FAILED\n");
+  }
+
+  float deg = 0.0f;
+  if (ok && scanTurn(-1.0f, deg)) {
+    d.cw *= 360.0f / deg;
+    DBG_PRINTF("right   : gyro measured %.2f deg for 360 -> scale %.4f\n", deg, d.cw);
+  } else {
+    ok = false;
+    DBG_PRINTF("right   : FAILED\n");
+  }
+
+  if (ok && scanTurn(1.0f, deg)) {
+    d.ccw *= 360.0f / deg;
+    DBG_PRINTF("left    : gyro measured %.2f deg for 360 -> scale %.4f\n", deg, d.ccw);
+  } else {
+    ok = false;
+    DBG_PRINTF("left    : FAILED\n");
+  }
+
+  if (ok) {
+    const float b0 = settledFrontMm();
+    const float eb = encoderTravel();
+    motion::reverse(fminf(fwdTrue, CAL8_MAX_FRONT_MM) - 20.0f, CAL8_TIER);
+    ok = waitMotion() == motion::Result::DONE;
+    const float b1 = settledFrontMm();
+    const float backTrue = b1 - b0, backEnc = eb - encoderTravel();
+    if (ok && b0 > 0.0f && b1 > 0.0f && backEnc > CAL8_MIN_TRAVEL_MM && backTrue > CAL8_MIN_TRAVEL_MM) {
+      d.backward *= backTrue / backEnc;
+      DBG_PRINTF("back    : sonar %.1f mm, encoders %.1f mm -> scale %.4f\n", backTrue, backEnc, d.backward);
+    } else {
+      ok = false;
+      DBG_PRINTF("back    : FAILED\n");
+    }
+  }
+
+  sonar::setFrontOnly(false);
+  motors::disable();
+  reportFaultIfAny();
+  if (ok && calib::save(d)) {
+    DBG_PRINTF("saved: forward %.4f back %.4f right %.4f left %.4f\n", d.forward, d.backward, d.cw, d.ccw);
+    ui::soundCalSaved();
+  } else {
+    DBG_PRINTF("calibration not saved (a step failed or a scale is outside %.2f-%.2f).\n", CAL8_SCALE_MIN,
+               CAL8_SCALE_MAX);
+    ui::soundError();
+  }
+}
 void runMode(uint8_t n) {
   ui::beep(n, 80, 150);
   waitBeeps();
@@ -590,6 +736,7 @@ void runMode(uint8_t n) {
     case 4: modePivot4(); break;
     case 5: modeAutoCal(); break;
     case 6: modeStepTest(); break;
+    case 8: modeDirectionCal(); break;
     default: break;
   }
   motors::disable();
@@ -640,13 +787,13 @@ void bootSelfCheck(bool imuOk) {
   waitBeeps();
   if (working < 4) ui::soundError();
   showIdleLed();
-  DBG_PRINTF("ready: click 1-7 to select a mode.\n");
+  DBG_PRINTF("ready: click 1-8 to select a mode.\n");
 }
 
 void menu() {
   const uint8_t n = readClicks();
   if (n > 0) runMode(n);
-  DBG_PRINTF("ready: click 1-7 to select a mode.\n");
+  DBG_PRINTF("ready: click 1-8 to select a mode.\n");
 }
 
 }

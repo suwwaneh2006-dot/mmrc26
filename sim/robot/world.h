@@ -43,6 +43,7 @@ void setEcho(bool echo);
 
 struct Stats {
   int    crashes;
+  int    pivotCrashes;
   double distanceMm;
   float  minWallClearanceMm;
   int    stops;

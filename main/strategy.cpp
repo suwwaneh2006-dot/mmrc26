@@ -214,8 +214,22 @@ bool recentreForPivot() {
   return waitMotion();
 }
 
+bool pivotSafe() {
+  if (sonar::ageMs(sonar::LEFT) > RECENTRE_READING_MAX_AGE_MS || sonar::ageMs(sonar::RIGHT) > RECENTRE_READING_MAX_AGE_MS ||
+      sonar::ageMs(sonar::FRONT) > RECENTRE_READING_MAX_AGE_MS) {
+    sched::waitMs(STATIONARY_READ_MS);
+  }
+  const sonar::Reading f = sonar::read(sonar::FRONT);
+  if (f.inRange && f.mm < FRONT_STOP_READING_MM - ALIGN_TOLERANCE_MM) {
+    motion::reverse(FRONT_STOP_READING_MM - f.mm, TIERS[0]);
+    if (!waitMotion()) return false;
+    sched::waitMs(STATIONARY_READ_MS);
+  }
+  return recentreForPivot();
+}
+
 bool pivotPhysical(float angleDeg, const SpeedTier& tier) {
-  if (!recentreForPivot()) return false;
+  if (!pivotSafe()) return false;
   motion::pivot(angleDeg, tier);
   if (!waitMotion()) return false;
   g_nextSigma = fmaxf(g_nextSigma, ALIGNED_SIGMA_MM);
@@ -398,7 +412,7 @@ Outcome pathRun(Explorer::Target target, int tierIdx) {
 
 struct TierPolicy {
   int  clean[4] = {0, 0, 0, 0};
-  int  maxTier = 3;
+  int  maxTier = MATCH_MAX_TIER;
   bool t3Tried = false, t3Clean = false, t4Tried = false;
 
   int choose() const {

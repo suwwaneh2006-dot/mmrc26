@@ -19,6 +19,7 @@ namespace {
 
 TrueMaze g_truth;
 bool     g_mirror = false;
+bool     g_mode8 = false;
 
 struct Act {
   uint64_t at;
@@ -49,7 +50,21 @@ double numberAfter(const char* line, const char* key) {
 
 void onLine(const char* line) {
   const uint64_t now = world::nowUs();
-  if (!sawMenu && strstr(line, "ready: click 1-7")) {
+  if (g_mode8) {
+    if (!sawMenu && strstr(line, "ready: click 1-8")) {
+      sawMenu = true;
+      for (int i = 0; i < 8; ++i) press(now + 300000u + i * 300000u, 100);
+    } else if (strstr(line, "mode 8: short press = start")) {
+      press(now + 500000u, 100);
+    } else if (strstr(line, "saved: forward") || strstr(line, "calibration not saved")) {
+      const world::Stats st = world::stats();
+      std::printf("MODE8 %s | crashes %d\n", strstr(line, "saved: forward") ? "SAVED" : "FAILED", st.crashes);
+      std::fflush(stdout);
+      std::exit(strstr(line, "saved: forward") && st.crashes == 0 ? 0 : 1);
+    }
+    return;
+  }
+  if (!sawMenu && strstr(line, "ready: click 1-8")) {
     sawMenu = true;
     for (int i = 0; i < 7; ++i) press(now + 300000u + i * 300000u, 100);
   } else if (!sawMirror && strstr(line, "mirror: short press toggles")) {
@@ -114,6 +129,7 @@ void finish(int code, const char* why) {
   std::printf("runs to goal    %d\nreturns         %d\naborts          %d\n", runsOk, returnsOk, aborts);
   for (const std::string& r : abortReasons) std::printf("   %s\n", r.c_str());
   std::printf("CRASHES         %d\n", st.crashes);
+  std::printf("pivot crashes   %d\n", st.pivotCrashes);
   std::printf("min clearance   %.1f mm (footprint to wall while moving)\n", st.minWallClearanceMm);
   if (st.stops > 0) {
     std::printf("stop accuracy   %d stops: along-track mean %.1f / max %.1f mm, lateral mean %.1f / max %.1f mm,"
@@ -169,6 +185,7 @@ int main(int argc, char** argv) {
     if (!strcmp(argv[i], "--mirror")) g_mirror = true;
     else if (!strcmp(argv[i], "--quiet")) quiet = true;
     else if (!strcmp(argv[i], "--no-enc")) p.encoders = false;
+    else if (!strcmp(argv[i], "--mode8")) g_mode8 = true;
     else if (!strcmp(argv[i], "--enc-fail") && i + 1 < argc) p.encoderFailAtS = static_cast<float>(atof(argv[++i]));
     else if (!strcmp(argv[i], "--harsh")) {
       p.sonarNoiseMm = 4.0f;

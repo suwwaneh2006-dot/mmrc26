@@ -15,7 +15,7 @@ struct Wheel {
   float             speed;
 
   uint32_t          windowEdges;
-  int32_t           windowSigned;
+  float             windowMm;
   float             windowTime;
 
   uint32_t          silentMs;
@@ -24,9 +24,12 @@ struct Wheel {
   uint32_t          drivenSilentMs;
 };
 
-Wheel g_left  = {PIN_ENC_L_A, 0, 0, 1, 0.0f, 0.0f, 0, 0, 0.0f, 0, false, 0, 0};
-Wheel g_right = {PIN_ENC_R_A, 0, 0, 1, 0.0f, 0.0f, 0, 0, 0.0f, 0, false, 0, 0};
+Wheel g_left  = {PIN_ENC_L_A, 0, 0, 1, 0.0f, 0.0f, 0, 0.0f, 0.0f, 0, false, 0, 0};
+Wheel g_right = {PIN_ENC_R_A, 0, 0, 1, 0.0f, 0.0f, 0, 0.0f, 0.0f, 0, false, 0, 0};
 uint32_t g_bothSilentMs = 0;
+
+float g_fwdScale = 1.0f;
+float g_backScale = 1.0f;
 
 void IRAM_ATTR edgeIsr(void* arg) {
   Wheel* w = static_cast<Wheel*>(arg);
@@ -43,14 +46,15 @@ void updateWheel(Wheel& w, float appliedV, bool otherCounting, float dt_s) {
   const uint32_t e = w.edges;
   const uint32_t delta = e - w.lastEdges;
   w.lastEdges = e;
-  w.mm += w.dir * static_cast<float>(delta) * ENC_MM_PER_EDGE;
+  const float stepMm = w.dir * static_cast<float>(delta) * ENC_MM_PER_EDGE * (w.dir > 0 ? g_fwdScale : g_backScale);
+  w.mm += stepMm;
 
-  w.windowSigned += w.dir * static_cast<int32_t>(delta);
+  w.windowMm += stepMm;
   w.windowTime += dt_s;
   if (w.windowTime * 1000.0f >= ENC_SPEED_WINDOW_MS) {
-    const float raw = w.windowSigned * ENC_MM_PER_EDGE / w.windowTime;
+    const float raw = w.windowMm / w.windowTime;
     w.speed += (raw - w.speed) * ENC_SPEED_FILTER;
-    w.windowSigned = 0;
+    w.windowMm = 0.0f;
     w.windowTime = 0.0f;
   }
 
@@ -121,6 +125,11 @@ uint32_t rightEdges() { return g_right.edges; }
 bool healthy() { return !g_left.faulty && !g_right.faulty; }
 bool leftFaulty() { return g_left.faulty; }
 bool rightFaulty() { return g_right.faulty; }
+void setDirectionScale(float forward, float backward) {
+  g_fwdScale = forward;
+  g_backScale = backward;
+}
+
 bool leftUsable() { return !g_left.faulty && g_left.drivenSilentMs < ENC_SUSPECT_MS; }
 bool rightUsable() { return !g_right.faulty && g_right.drivenSilentMs < ENC_SUSPECT_MS; }
 
